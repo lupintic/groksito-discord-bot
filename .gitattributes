@@ -1,0 +1,20 @@
+﻿# Auto-detect text files and normalize line endings to LF
+* text=auto
+
+# Explicit line endings for common file types in this project
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+Dockerfile text eol=lf
+docker-compose*.yml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+setup.py text eol=lf
+requirements*.txt text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
