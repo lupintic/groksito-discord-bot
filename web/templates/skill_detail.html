@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Groksito • {{ skill.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+    <div class="mb-4 flex items-center gap-x-3">
+        <a href="/skills" class="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">← Back to Skills</a>
+    </div>
+
+    <div class="card bg-white border border-slate-200 dark:border-slate-700 rounded-3xl p-6 dark:bg-slate-900">
+        <div class="flex items-start justify-between">
+            <div>
+                <h2 class="font-display text-2xl font-semibold tracking-tighter dark:text-white">{{ skill.name }}</h2>
+                <div class="mt-1">
+                    {% if skill.approved %}
+                    <span class="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-medium bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 text-emerald-700">Approved</span>
+                    {% else %}
+                    <span class="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/40 dark:text-amber-300 text-amber-700">Pending</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                {% if skill.approved %}
+                <form method="POST" action="/skills/{{ skill.id }}/revoke" onsubmit="return confirm('DISABLE this skill?\n\nIt will stop being auto-selected. This is reversible.')">
+                    <button type="submit" class="px-4 py-1.5 text-sm bg-amber-100 dark:bg-amber-900/40 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 text-amber-700 rounded-2xl">Disable</button>
+                </form>
+                {% else %}
+                <form method="POST" action="/skills/{{ skill.id }}/approve" onsubmit="return confirm('APPROVE this skill?\n\nIt will become active for the decision layer. This is reversible.')">
+                    <button type="submit" class="px-4 py-1.5 text-sm bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800 text-emerald-700 rounded-2xl">Approve</button>
+                </form>
+                {% endif %}
+
+                <form method="POST" action="/skills/{{ skill.id }}/delete" onsubmit="return confirm('PERMANENTLY DELETE this skill?\n\nThis cannot be undone. Destructive write.')">
+                    <button type="submit" class="px-4 py-1.5 text-sm bg-red-100 dark:bg-red-900/40 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-800 text-red-700 rounded-2xl">Delete</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="mt-6 space-y-6 text-sm">
+            <div>
+                <div class="font-medium text-slate-500 dark:text-slate-400 text-xs tracking-wider">DESCRIPTION</div>
+                <p class="mt-1 text-slate-700 dark:text-slate-200">{{ skill.description or "No description." }}</p>
+            </div>
+
+            <div>
+                <div class="font-medium text-slate-500 dark:text-slate-400 text-xs tracking-wider">INSTRUCTIONS (used by the model)</div>
+                <pre class="mt-1 p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl text-xs overflow-auto whitespace-pre-wrap border border-slate-100 dark:border-slate-700 dark:text-slate-200">{{ skill.instructions }}</pre>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <div class="font-medium text-slate-500 dark:text-slate-400 text-xs tracking-wider">ALLOWED TOOLS</div>
+                    <div class="mt-1">
+                        {% if skill.allowed_tools %}
+                        <div class="flex flex-wrap gap-1">
+                            {% for tool in skill.allowed_tools %}
+                            <span class="inline-block px-2 py-0.5 bg-slate-100 dark:bg-slate-800 dark:text-slate-300 text-slate-700 rounded text-xs">{{ tool }}</span>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <span class="text-slate-400">None specified</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div>
+                    <div class="font-medium text-slate-500 dark:text-slate-400 text-xs tracking-wider">METADATA</div>
+                    <dl class="mt-1 space-y-1 text-xs">
+                        <div class="flex"><dt class="w-28 text-slate-500 dark:text-slate-400">ID</dt><dd class="font-mono text-slate-700 dark:text-slate-200">{{ skill.id }}</dd></div>
+                        <div class="flex"><dt class="w-28 text-slate-500 dark:text-slate-400">Created from</dt><dd class="text-slate-700 dark:text-slate-200">{{ skill.created_from_pattern or "—" }}</dd></div>
+                        <div class="flex"><dt class="w-28 text-slate-500 dark:text-slate-400">Created at</dt><dd class="text-slate-700 dark:text-slate-200">{{ skill.created_at | format_ts }}</dd></div>
+                        {% if skill.approved %}
+                        <div class="flex"><dt class="w-28 text-slate-500 dark:text-slate-400">Approved by</dt><dd class="text-slate-700 dark:text-slate-200">{{ skill.approved_by or "—" }}</dd></div>
+                        <div class="flex"><dt class="w-28 text-slate-500 dark:text-slate-400">Approved at</dt><dd class="text-slate-700 dark:text-slate-200">{{ skill.approved_at | format_ts }}</dd></div>
+                        {% endif %}
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flash messages at bottom for this view -->
+    {% if messages %}
+    <div class="mt-6 space-y-2">
+        {% for msg in messages %}
+        <div class="px-4 py-3 rounded-2xl text-sm {% if msg.type == 'success' %}bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300{% else %}bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300{% endif %}">
+            {{ msg.text }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

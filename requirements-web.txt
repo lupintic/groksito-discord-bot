@@ -1,0 +1,30 @@
+# =============================================================================
+# Groksito Web Dashboard — Minimal Requirements
+# =============================================================================
+# Used exclusively by the "web" build stage in the multi-stage Dockerfile.
+# This produces a much smaller image (~300 MB range) compared to the full
+# bot image that needs discord.py, openai client, pydub, ffmpeg, docker-ce-cli, etc.
+#
+# The web dashboard (FastAPI + Jinja2 + Tailwind via CDN) only needs:
+# - FastAPI + uvicorn to serve the UI
+# - Jinja2 for templates
+# - python-multipart for form handling (config editor)
+# - pydantic + pydantic-settings (because it imports groksito_discord.config
+#   and groksito_discord.skills.skill_registry for the safe .env writer and
+#   the skills approve/revoke UI)
+#
+# It deliberately does NOT pull in discord.py, the LLM clients, media libs,
+# rich, structlog, etc. Those stay only in the bot stage.
+# =============================================================================
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+jinja2>=3.1.4
+python-multipart
+
+# Required because web/main.py does:
+#   from groksito_discord.env_utils ...
+#   from groksito_discord.skills.skill_registry import ...
+# and skill_registry does "from ..config import settings"
+pydantic>=2.11.7
+pydantic-settings>=2.4.0

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Groksito • Stats &amp; Activity{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl">
+    <div class="mb-6">
+        <h2 class="font-display text-3xl font-semibold tracking-[-0.03em] text-white">Stats &amp; Activity</h2>
+        <p class="text-[#8a8f98] text-sm mt-1">Read-only session usage and recent channel activity from the bot.</p>
+    </div>
+
+    <!-- Token / LLM Stats -->
+    <div class="card p-6 mb-6">
+        <div class="flex items-center justify-between mb-3">
+            <div class="text-xs text-[#8a8f98] font-mono tracking-[1px]">LLM / TOKEN USAGE (SESSION)</div>
+            {% if stats.stats %}
+            <button onclick="copyToClipboard('calls:{{ stats.stats.calls }} prompt:{{ stats.stats.prompt_tokens }} completion:{{ stats.stats.completion_tokens }} cost:{{ stats.stats.estimated_cost_usd }}', this)"
+                    class="text-[10px] px-2 py-0.5 border border-[#222326] hover:border-[#67f6ff] text-[#8a8f98] font-mono">copy</button>
+            {% endif %}
+        </div>
+
+        {% if stats.stats %}
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div>
+                <div class="text-[10px] text-[#8a8f98]">calls</div>
+                <div class="text-3xl font-semibold tracking-tighter text-white">{{ stats.stats.calls or 0 }}</div>
+            </div>
+            <div>
+                <div class="text-[10px] text-[#8a8f98]">prompt</div>
+                <div class="text-3xl font-semibold tracking-tighter text-white">{{ stats.stats.prompt_tokens or 0 }}</div>
+            </div>
+            <div>
+                <div class="text-[10px] text-[#8a8f98]">completion</div>
+                <div class="text-3xl font-semibold tracking-tighter text-white">{{ stats.stats.completion_tokens or 0 }}</div>
+            </div>
+            <div>
+                <div class="text-[10px] text-[#8a8f98]">total</div>
+                <div class="text-3xl font-semibold tracking-tighter text-white">{{ stats.stats.total_tokens or 0 }}</div>
+            </div>
+            <div>
+                <div class="text-[10px] text-[#8a8f98]">est. cost</div>
+                <div class="text-3xl font-semibold tracking-tighter text-[#22ff88]">${{ "%.4f"|format(stats.stats.estimated_cost_usd or 0) }}</div>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-sm text-[#8a8f98]">No stats snapshot yet. Bot publishes aggregates shortly after start.</div>
+        {% endif %}
+
+        {% if stats.recent_calls %}
+        <div class="mt-6">
+            <div class="text-[10px] text-[#8a8f98] font-mono mb-2">RECENT CALLS (latest {{ stats.recent_calls|length }})</div>
+            <div class="space-y-1 text-xs font-mono bg-[#0a0a0a] border border-[#222326] p-2 rounded max-h-[210px] overflow-auto">
+                {% for c in stats.recent_calls %}
+                <div class="flex items-center gap-x-3 px-2 py-1 border-b border-[#1a1b1e] last:border-none group">
+                    <span class="text-[#8a8f98] w-20">{{ c.ts | format_ts if c.ts else '—' }}</span>
+                    <span class="text-[#a0a5af]">{{ c.category or '—' }}</span>
+                    <span class="text-[#8a8f98]">p={{ c.prompt }} c={{ c.completion }} t={{ c.total }}</span>
+                    <span class="text-[#22ff88]">~${{ "%.4f"|format(c.cost_usd or 0) }}</span>
+                    {% if c.cached_tokens %}<span class="text-[10px] text-[#f4b942]">cached={{ c.cached_tokens }}</span>{% endif %}
+                    <button onclick="copyToClipboard('{{ c.prompt }}/{{ c.completion }} {{ c.category }}', this)"
+                            class="ml-auto opacity-0 group-hover:opacity-100 text-[9px] px-1.5 py-px border border-[#222326] text-[#67f6ff]">copy</button>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Video + Health -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="card p-5">
+            <div class="text-xs text-[#8a8f98] font-mono">VIDEO (TODAY)</div>
+            <div class="text-4xl font-semibold tracking-tighter text-white mt-1">{{ quotas.total_video_today or 0 }}</div>
+            <div class="text-[10px] text-[#8a8f98]">total (hard limit 5/user/day)</div>
+        </div>
+        <div class="card p-5">
+            <div class="text-xs text-[#8a8f98] font-mono mb-2">HEALTH SNAPSHOT</div>
+            <div class="text-sm space-y-1 font-mono">
+                {% if health %}
+                    <div>video: <span class="text-[#67f6ff]">{{ 'enabled' if health.video_generation_enabled else 'disabled' }}</span></div>
+                    <div>docker sandboxes: <span class="text-[#67f6ff]">{{ 'yes' if health.docker_available_for_sandboxes else 'no' }}</span></div>
+                    <div>emoji knowledge: <span class="text-white">{{ health.emoji_knowledge_count or 0 }}</span></div>
+                {% else %}
+                    <span class="text-[#8a8f98]">no health snapshot yet</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+            <div>
+                <span class="text-xs text-[#8a8f98] font-mono tracking-[1px]">RECENT ACTIVITY</span>
+                <span class="text-[10px] text-[#8a8f98] ml-2">(bot short-term view • last {{ activity|length }})</span>
+            </div>
+        </div>
+
+        {% if activity %}
+        <div class="space-y-1 text-sm max-h-[380px] overflow-auto pr-1 font-mono border border-[#222326] bg-[#0a0a0a] p-2 rounded">
+            {% for item in activity %}
+            <div class="border-b border-[#1a1b1e] last:border-none px-2 py-1.5">
+                <div class="flex items-center gap-x-3 text-[11px]">
+                    <span class="text-[#8a8f98] w-24" title="{{ item.ts | format_ts if item.ts else '' }}">
+                        <span class="reltime" data-ts="{{ item.ts }}">{{ item.ts | format_ts if item.ts else '—' }}</span>
+                    </span>
+                    <span class="text-[#e6e6e6]">{{ item.author }}</span>
+                    {% if item.is_bot %}<span class="text-[#22ff88] text-[10px]">[bot]</span>{% endif %}
+                    <span class="text-[#8a8f98] text-[10px]">#{{ item.channel_id }}</span>
+                </div>
+
+                {% set content = item.content or "(no text)" %}
+                <div class="mt-0.5 text-[#a0a5af] whitespace-pre-wrap break-words">
+                    {% if content|length > 160 %}
+                        <span class="msg-preview">{{ content[:160] }}…</span>
+                        <span class="msg-full hidden">{{ content }}</span>
+                        <button onclick="toggleMessage(this)" class="ml-2 text-[10px] text-[#67f6ff] align-super">[more]</button>
+                    {% else %}
+                        {{ content }}
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-sm text-[#8a8f98] py-6">No recent activity data available yet.</div>
+        {% endif %}
+
+        <div class="mt-3 text-[10px] text-[#8a8f98]">
+            read-only extraction from short-term channel buffers (pantsu_context.json)
+        </div>
+    </div>
+</div>
+
+<script>
+    // Apply relative time on load for this page
+    function applyRelativeTimes() {
+        document.querySelectorAll('.reltime').forEach(function(el) {
+            var ts = parseFloat(el.getAttribute('data-ts'));
+            if (ts && window.formatRelativeTime) {
+                el.textContent = window.formatRelativeTime(ts);
+            }
+        });
+    }
+
+    function toggleMessage(btn) {
+        var container = btn.parentElement;
+        var preview = container.querySelector('.msg-preview');
+        var full = container.querySelector('.msg-full');
+        if (!full || !preview) return;
+        if (full.classList.contains('hidden')) {
+            full.classList.remove('hidden');
+            preview.classList.add('hidden');
+            btn.textContent = '[less]';
+        } else {
+            full.classList.add('hidden');
+            preview.classList.remove('hidden');
+            btn.textContent = '[more]';
+        }
+    }
+
+    // Run on load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', applyRelativeTimes);
+    } else {
+        applyRelativeTimes();
+    }
+</script>
+{% endblock %}

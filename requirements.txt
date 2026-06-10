@@ -1,0 +1,37 @@
+# =============================================================================
+# Groksito Discord Bot — Standalone Requirements
+# =============================================================================
+# This is the curated dependency list for the independent conversational bot.
+# It deliberately excludes FastMCP, uvicorn, spotipy, and other MCP-gateway-only deps.
+#
+# After the extraction from pantsu-connector, this bot owns its own runtime.
+# =============================================================================
+
+# Discord Gateway + REST client (core)
+discord.py>=2.7.0,<3.0  # Targeting recent discord.py for full voice message support (flags + attachment metadata), Components V2, and future features. Avoids old 2.4/2.5 quirks we hit in Docker.
+
+# HTTP client for direct xAI image/video generation endpoints
+httpx>=0.27.0
+
+# OpenAI-compatible client for xAI Responses API (web_search, x_search, Grok reasoning)
+openai>=1.30.0
+
+# Configuration & validation (recommended for standalone project)
+pydantic>=2.11.7
+pydantic-settings>=2.4.0
+pydub>=0.25.1
+
+# Structured logging (optional but useful)
+structlog>=24.4.0
+
+# Colored logging + pretty startup banner (cyberpunk aesthetic)
+rich>=13.7.0
+
+# Note: All image/video generation, vision, memory, and tool logic is self-contained.
+# No FastMCP, no server frameworks, no Spotify dependencies.
+
+# Web dashboard (separate FastAPI app in web/)
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+jinja2>=3.1.4
+python-multipart

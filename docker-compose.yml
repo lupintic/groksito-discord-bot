@@ -1,0 +1,99 @@
+# =============================================================================
+# Groksito Discord Bot — Standalone docker-compose
+# =============================================================================
+# This compose file is for the independent bot project.
+# It does not depend on the old pantsu-connector services.
+# =============================================================================
+
+services:
+  groksito-discord-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: bot
+    container_name: groksito-discord-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persistent storage for user memory and conversation context
+      - ./data:/app/data
+
+      # Persistent storage for OAuth tokens (xai_oauth_tokens.json).
+      # This is *required* if you want to keep your SuperGrok/X Premium+ login
+      # across container restarts, `docker compose down`, image rebuilds, etc.
+      # Without this volume the tokens live only inside the container and will
+      # be lost when the container is removed.
+      #
+      # Recommended usage:
+      #   1. mkdir -p ./oauth
+      #   2. Run the container with this compose (it will create the file on first --login-oauth)
+      #   3. The directory is mounted at /app/oauth inside the container, matching
+      #      the default path used by the code (Path("oauth") relative to WORKDIR).
+      #
+      # You can also override the exact file with GROK_OAUTH_TOKEN_FILE in .env
+      # if you prefer a different location.
+      - ./oauth:/app/oauth
+
+      # Optional: Mount the host Docker socket to enable full skill sandbox power tools
+      # (code_execution and playwright_browser). These tools are *only* offered to
+      # approved skills that explicitly declare them in allowed_tools.
+      #
+      # Security note: This gives the container access to the host Docker daemon.
+      # Use only if you trust the skills you approve. On production, consider
+      # network restrictions or a dedicated Docker-in-Docker setup.
+      #
+      # After adding this, rebuild if needed: docker compose up --build
+      # On Linux: ensure the container user can access the socket (docker group or root).
+      # On Docker Desktop (Windows/Mac): the default socket usually works.
+      #
+      # - /var/run/docker.sock:/var/run/docker.sock
+      #
+      # The health check (--status) will report whether Docker is available for sandboxes.
+      # Without the socket, sandboxes gracefully fall back to simulation messages.
+    environment:
+      - DATA_DIR=/app/data
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - FORCE_COLOR=1  # Ensure rich colored logs + banner render nicely in `docker compose up` (non-tty)
+    # Optional: expose nothing (the bot is purely event-driven)
+    # ports: []
+
+    # Healthcheck can be added later once a /health endpoint or similar exists
+    # healthcheck:
+    #   test: ["CMD", "python", "-c", "print('healthy')"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    container_name: groksito-config-web
+    command: uvicorn web.main:app --host 0.0.0.0 --port 8010
+    # The "web" target in the multi-stage Dockerfile produces a much smaller image
+    # (~280-400 MB) than the full "bot" target. It only contains the FastAPI
+    # dashboard + the minimal bot modules it imports (env_utils + skill_registry).
+    ports:
+      - "8010:8010"
+    env_file:
+      - .env
+    volumes:
+      # Share data for quotas/context
+      - ./data:/app/data
+      # Share oauth if needed
+      - ./oauth:/app/oauth
+      # Mount .env so web can read/edit config (changes require bot restart)
+      - ./.env:/app/.env
+    environment:
+      - DATA_DIR=/app/data
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
+    # Run independently: docker compose up web
+    # Does not depend on the bot service
+
+networks:
+  default:
+    name: groksito-network
+    driver: bridge

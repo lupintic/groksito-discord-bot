@@ -1,0 +1,101 @@
+# =============================================================================
+# .dockerignore — keep Docker build contexts small, fast, and clean
+# =============================================================================
+# This is critical because both the bot and web services share the root build
+# context. Without it we were sending caches, local data, secrets, tests, etc.
+# into every image build.
+
+# Python bytecode / build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+*.whl
+
+# Virtual environments (never needed inside the image)
+.venv/
+venv/
+ENV/
+env/
+.venv
+
+# IDE / editor noise
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-*
+
+# Environment & secrets — NEVER bake tokens or .env into images
+.env
+.env.*
+*.env
+.env.local
+oauth/
+xai_oauth_tokens.json
+oauth/*.json
+
+# Project runtime data (persisted via volumes at runtime; do not bake snapshots in)
+data/
+*.json
+!data/.gitkeep
+
+# Logs and temp files
+*.log
+logs/
+*.tmp
+*.bak
+*.orig
+*.cache
+
+# Testing / coverage / dev tooling
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+scripts/
+
+# Git (history is large and irrelevant at runtime)
+.git/
+.gitignore
+.gitattributes
+
+# Docker compose overrides (host-specific)
+docker-compose.override.yml
+docker-compose.*.yml
+
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Documentation (not required at runtime; keeps image smaller)
+*.md
+!README.md               # keep the main one if you really want it (usually still exclude)
+!web/README.md
+!GROK_OAUTH.md
+!ARCHITECTURE.md
+
+# Anything else that is large or host-only
+__pycache__
+*.pyc
+*.pyo

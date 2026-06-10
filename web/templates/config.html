@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+
+{% block title %}Groksito • Configuration{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+    {# Top level strong warning banner #}
+    <div class="mb-4 p-3 border border-[#f4b942] bg-[#111214] text-[#f4b942] text-sm rounded font-mono">
+        <strong>PROTECTED — edit only via setup.py for secrets</strong><br>
+        This UI edits safe non-secret settings only. Protected keys (tokens, auth) are never touched.
+    </div>
+
+    <div class="mb-6">
+        <h2 class="font-display text-2xl font-semibold tracking-tighter">Configuration</h2>
+        <p class="text-slate-600 text-sm mt-1">Safe settings only. A full backup of .env (timestamped + .env.backup) is created automatically on every save.</p>
+    </div>
+
+    {# Flash messages (now include the strong restart reminder for saved=1 and detailed save errors) #}
+    {% for m in messages or [] %}
+        {% if m.type == 'success' %}
+        <div class="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-2xl">
+            {{ m.text }}
+        </div>
+        {% elif m.type == 'error' %}
+        <div class="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-2xl">
+            {{ m.text }}
+        </div>
+        {% endif %}
+    {% endfor %}
+
+    {# --- Protected Auth / OAuth Status (always visible, read-only, high visibility) --- #}
+    <div class="mb-6 card bg-white border border-slate-200 dark:border-slate-700 rounded-3xl p-5 dark:bg-slate-900">
+        <div class="flex items-center justify-between mb-3">
+            <div>
+                <h3 class="font-semibold text-base tracking-tight dark:text-white">Authentication &amp; OAuth Status (Protected)</h3>
+                <p class="text-[11px] text-slate-500 dark:text-slate-400">These values live in .env or the oauth/ directory. The web UI never touches the secret values and will auto-restore from backup if a save would have removed a critical key.</p>
+            </div>
+            <div class="text-right text-xs">
+                {% if auth_status.has_any_credential %}
+                <span class="inline-block px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 text-emerald-700 rounded-full">Credential detected</span>
+                {% else %}
+                <span class="inline-block px-2 py-0.5 bg-rose-100 dark:bg-rose-900/40 dark:text-rose-300 text-rose-700 rounded-full">No credential</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div class="rounded-2xl border border-slate-100 dark:border-slate-700 p-3 dark:bg-slate-800/50">
+                <div class="text-slate-500 dark:text-slate-400 text-xs">XAI_API_KEY</div>
+                <div class="font-mono text-xs mt-0.5 dark:text-slate-200">
+                    {% if auth_status.xai_api_key_present %}✅ {{ auth_status.xai_api_key_masked }}{% else %}❌ {{ auth_status.xai_api_key_masked }}{% endif %}
+                </div>
+            </div>
+            <div class="rounded-2xl border border-slate-100 dark:border-slate-700 p-3 dark:bg-slate-800/50">
+                <div class="text-slate-500 dark:text-slate-400 text-xs">Discord Bot Token</div>
+                <div class="mt-0.5 dark:text-slate-200">
+                    {% if auth_status.discord_token_present %}✅ Present (hidden){% else %}❌ Missing{% endif %}
+                </div>
+            </div>
+            <div class="rounded-2xl border border-slate-100 dark:border-slate-700 p-3 dark:bg-slate-800/50">
+                <div class="text-slate-500 dark:text-slate-400 text-xs">GROK_AUTH_MODE</div>
+                <div class="font-medium mt-0.5 dark:text-white">{{ auth_status.grok_auth_mode or 'api_key' }}</div>
+                <div class="text-[10px] text-slate-400 dark:text-slate-500">api_key (default) • auto (prefer OAuth) • oauth (strict)</div>
+            </div>
+            <div class="rounded-2xl border border-slate-100 dark:border-slate-700 p-3 dark:bg-slate-800/50">
+                <div class="text-slate-500 dark:text-slate-400 text-xs">OAuth Token File</div>
+                <div class="mt-0.5 text-xs dark:text-slate-200">
+                    {% if auth_status.oauth_token_file_exists %}✅ Exists{% else %}❌ Not found{% endif %}
+                    <div class="font-mono text-[10px] text-slate-400 dark:text-slate-500 truncate">{{ auth_status.oauth_token_file }}</div>
+                </div>
+                <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Tokens are stored in a separate JSON (never in .env). Use <code>--login-oauth</code> to create/refresh.</div>
+            </div>
+        </div>
+
+        <div class="mt-3 text-xs text-slate-500">
+            Effective credential for the bot: <span class="font-medium">{{ auth_status.effective_credential }}</span>
+        </div>
+
+        {% if warnings %}
+        <div class="mt-3 p-2 bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 rounded-2xl text-xs text-rose-700 dark:text-rose-300">
+            {% for w in warnings %}<div>• {{ w }}</div>{% endfor %}
+            <div class="mt-1">Tip: set secrets directly in .env or run the OAuth login flow from the bot CLI.</div>
+        </div>
+        {% endif %}
+
+        <div class="mt-2 text-[10px] text-slate-400 dark:text-slate-500">
+            Backups: timestamped copies + <code>.env.backup</code> (latest) are created on every web save. 
+            {% if backup_info.latest_backup %}Latest: <code>{{ backup_info.latest_backup }}</code>{% endif %}
+        </div>
+    </div>
+
+    {# --- Editable form (grouped, professional terminal style) --- #}
+    <style>
+        .config-row {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.75rem 1rem;
+            align-items: center;
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
+        }
+        @media (min-width: 768px) {
+            .config-row {
+                grid-template-columns: 2.2fr 1.1fr 2.7fr;
+            }
+        }
+        .config-label {
+            font-weight: 500;
+            color: #e6e6e6;
+            line-height: 1.1;
+        }
+        .config-subtitle {
+            font-size: 10px;
+            color: #8a8f98;
+            margin-top: 1px;
+            font-family: var(--font-mono, monospace);
+        }
+        .config-key {
+            font-size: 9px;
+            color: #64748b;
+            font-family: var(--font-mono, monospace);
+            margin-top: 2px;
+        }
+        .config-input {
+            width: 100%;
+            max-width: 180px;
+        }
+        .config-help {
+            font-size: 11px;
+            color: #8a8f98;
+            line-height: 1.3;
+        }
+        .section-header {
+            font-size: 10px;
+            font-family: var(--font-mono, monospace);
+            color: #67f6ff;
+            letter-spacing: 1px;
+            border-bottom: 1px solid rgba(103, 246, 255, 0.25);
+            padding-bottom: 4px;
+            margin-bottom: 8px;
+        }
+    </style>
+    <form method="POST" action="/config/update" class="card p-6 space-y-6">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4 pb-3 border-b border-[#222326]">
+            <div class="text-sm font-mono text-[#67f6ff] tracking-[1px]">EDITABLE SETTINGS</div>
+            <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 text-xs w-full md:w-auto">
+                <input id="config-search" type="text" placeholder="Filter settings..." 
+                       class="bg-[#0a0a0a] border border-[#222326] text-sm px-3 py-1.5 font-mono rounded w-full sm:w-64 focus:border-[#67f6ff] focus:outline-none">
+                <label class="flex items-center gap-2 cursor-pointer text-[#8a8f98] whitespace-nowrap">
+                    <span>Show advanced</span>
+                    <input type="checkbox" id="show-advanced" class="sr-only peer">
+                    <span class="w-9 h-5 bg-[#222326] peer-focus:outline-none rounded-full peer peer-checked:bg-[#67f6ff] relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></span>
+                </label>
+            </div>
+        </div>
+
+        {% for sec_title, sec_keys in sections %}
+            <div class="pb-1">
+                <div class="section-header">{{ sec_title | upper }}</div>
+                <div class="space-y-0" data-section="{{ sec_title }}">
+                    {% for key in sec_keys %}
+                        {% set meta = config[key] %}
+                        {% if meta %}
+                        <div class="config-row setting-row {% if meta.advanced %}advanced-setting hidden{% endif %}"
+                             data-key="{{ key }}" data-text="{{ key }} {{ meta.help | default('') | lower }} {{ meta.display_name | default('') | lower }} {{ meta.subtitle | default('') | lower }}">
+                            <!-- Left: Label + subtitle + key -->
+                            <div>
+                                <label class="config-label text-sm" for="{{ key }}">
+                                    {{ meta.display_name or key.replace('_', ' ').title() }}
+                                </label>
+                                {% if meta.subtitle %}
+                                <div class="config-subtitle">{{ meta.subtitle }}</div>
+                                {% endif %}
+                                <div class="config-key">{{ key }}</div>
+                            </div>
+
+                            <!-- Middle: Input control -->
+                            <div class="config-input">
+                                {% if meta.type == 'bool' %}
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="{{ key }}" value="true" id="{{ key }}"
+                                           class="sr-only peer" {% if meta.value %}checked{% endif %}>
+                                    <div class="w-9 h-5 bg-[#222326] peer-focus:outline-none rounded-full peer peer-checked:bg-[#67f6ff] relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
+                                </label>
+                                {% elif meta.type == 'int' or meta.type == 'float' %}
+                                <input type="number" name="{{ key }}" value="{{ meta.value }}" id="{{ key }}" step="{% if meta.type == 'float' %}0.1{% else %}1{% endif %}"
+                                       class="w-full bg-[#0a0a0a] border border-[#222326] text-sm px-2 py-1 font-mono rounded focus:border-[#67f6ff]">
+                                {% elif key == 'log_level' %}
+                                <select name="{{ key }}" id="{{ key }}" class="w-full bg-[#0a0a0a] border border-[#222326] text-sm px-2 py-1 font-mono rounded focus:border-[#67f6ff]">
+                                    {% for lvl in ['DEBUG','INFO','WARNING','ERROR'] %}
+                                    <option value="{{ lvl }}" {% if meta.value == lvl %}selected{% endif %}>{{ lvl }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% elif key == 'tts_default_voice' %}
+                                <select name="{{ key }}" id="{{ key }}" class="w-full bg-[#0a0a0a] border border-[#222326] text-sm px-2 py-1 font-mono rounded focus:border-[#67f6ff]">
+                                    {% for v in ['eve','ara','rex','sal','leo'] %}
+                                    <option value="{{ v }}" {% if meta.value == v %}selected{% endif %}>{{ v }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% else %}
+                                <input type="text" name="{{ key }}" value="{{ meta.value }}" id="{{ key }}" 
+                                       class="w-full bg-[#0a0a0a] border border-[#222326] text-sm px-2 py-1 font-mono rounded focus:border-[#67f6ff]">
+                                {% endif %}
+                            </div>
+
+                            <!-- Right: Help + badges -->
+                            <div class="flex flex-col gap-0.5">
+                                <div class="config-help">{{ meta.help or '' }}</div>
+                                <div class="flex flex-wrap items-center gap-x-2 text-[10px] text-[#8a8f98] mt-0.5">
+                                    <span class="font-mono">def: {{ meta.default or '—' }}</span>
+                                    <span class="px-1.5 py-px border border-[#f4b942] text-[#f4b942] font-mono">RESTART</span>
+                                    {% if meta.advanced %}<span class="text-[9px] px-1 py-px border border-[#f4b942] text-[#f4b942]">ADV</span>{% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% if not loop.last %}<div class="border-t border-[#222326] my-1"></div>{% endif %}
+        {% endfor %}
+
+        <div class="pt-3 border-t border-[#222326] flex items-center justify-between text-xs text-[#8a8f98] font-mono">
+            <div>
+                <strong>Reminder:</strong> After saving you <strong>must restart</strong> the Discord bot process / container.
+            </div>
+            <button type="submit"
+                    class="px-5 py-1.5 bg-[#111214] border border-[#67f6ff] text-[#67f6ff] hover:bg-[#1a1b1e] text-sm font-mono rounded">
+                Save changes to .env
+            </button>
+        </div>
+    </form>
+
+    <div class="mt-6 card p-4 border border-[#222326]">
+        <div class="text-xs text-[#8a8f98] font-mono tracking-[1px] mb-2">MAINTENANCE</div>
+        <form method="POST" action="/config/dedup" onsubmit="return confirm('Clean duplicate keys in .env?\n\nThis uses the safe deduplication (keeps most recent value per key).\nA backup will be created first. This is a low-risk hygiene operation.')">
+            <button type="submit"
+                    class="px-4 py-1.5 text-xs border border-[#222326] hover:border-[#67f6ff] text-[#67f6ff] font-mono rounded">
+                Clean duplicate keys in .env
+            </button>
+            <span class="ml-3 text-[10px] text-[#8a8f98]">Removes older duplicates for the same key. Creates backup.</span>
+        </form>
+    </div>
+
+    <div class="mt-4 text-xs text-[#8a8f98] px-1 leading-snug font-mono">
+        All .env writes use atomic safe_write_env with backups, critical-key verification, and in-place updates. Restart required for most changes.
+    </div>
+</div>
+
+<script>
+    // Lightweight client-side search + advanced toggle for config page
+    (function() {
+        const search = document.getElementById('config-search');
+        const advToggle = document.getElementById('show-advanced');
+        const rows = document.querySelectorAll('.setting-row');
+
+        function filter() {
+            const q = (search ? search.value : '').toLowerCase().trim();
+            const showAdv = advToggle ? advToggle.checked : false;
+
+            rows.forEach(row => {
+                const text = row.getAttribute('data-text') || '';
+                const isAdv = row.classList.contains('advanced-setting');
+                const matchesSearch = !q || text.includes(q);
+                const matchesAdv = showAdv || !isAdv;
+                row.style.display = (matchesSearch && matchesAdv) ? '' : 'none';
+            });
+        }
+
+        if (search) search.addEventListener('input', filter);
+        if (advToggle) {
+            advToggle.addEventListener('change', filter);
+            // default OFF as requested
+            advToggle.checked = false;
+        }
+
+        // initial filter
+        filter();
+    })();
+</script>
+{% endblock %}

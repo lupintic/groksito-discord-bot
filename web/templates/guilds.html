@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+
+{% block title %}Groksito • Guilds &amp; Access{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl">
+    <div class="mb-6">
+        <h2 class="font-display text-3xl font-semibold tracking-[-0.03em] text-white">Guilds &amp; Access Control</h2>
+        <p class="text-[#8a8f98] text-sm mt-1">Live snapshot of connected servers + safe management of the bot's guild whitelist (ALLOWED_GUILD_IDS).</p>
+    </div>
+
+    <!-- Read-only connected snapshot (existing) -->
+    <div class="card p-5 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <div class="font-mono text-xs text-[#8a8f98]">
+                CONNECTED SERVERS (LIVE) <span class="text-white text-xl align-middle ml-1">{{ guilds.count or 0 }}</span>
+            </div>
+            {% if guilds.last_seen %}
+            <div class="text-[10px] text-[#8a8f98] font-mono">snapshot: {{ guilds.last_seen | format_ts if guilds.last_seen else '—' }}</div>
+            {% endif %}
+        </div>
+
+        {% if guilds.guilds %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm font-mono">
+                <thead>
+                    <tr class="text-left text-[10px] uppercase tracking-wider text-[#8a8f98] border-b border-[#222326]">
+                        <th class="py-2 pr-4">name</th>
+                        <th class="py-2 pr-4">id</th>
+                        <th class="py-2">members</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-[#1a1b1e]">
+                    {% for g in guilds.guilds %}
+                    <tr>
+                        <td class="py-2 pr-4 text-[#e6e6e6]">{{ g.name }}</td>
+                        <td class="py-2 pr-4">
+                            <button onclick="copyToClipboard('{{ g.id }}', this)"
+                                    class="font-mono text-xs text-[#67f6ff] hover:underline">{{ g.id }}</button>
+                        </td>
+                        <td class="py-2 text-[#a0a5af]">
+                            {% if g.member_count %}{{ g.member_count }}{% else %}—{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-sm text-[#8a8f98] py-8 text-center border border-dashed border-[#222326] rounded">
+            No guild snapshot available yet.<br>
+            <span class="text-xs">Start the Discord bot — it will publish the list within ~35s.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Access Control / Whitelist Management -->
+    <div class="card p-5" id="access-control">
+        <div class="font-mono text-xs text-[#8a8f98] tracking-[1px] mb-3">GUILD WHITELIST (ALLOWED_GUILD_IDS)</div>
+
+        <form id="whitelist-form" method="POST" action="/guilds/whitelist/update">
+            <input type="hidden" name="guild_ids" id="guild-ids-hidden" value="">
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Current / Planned -->
+                <div>
+                    <div class="text-[10px] text-[#8a8f98] mb-2 font-mono">CURRENT IN .ENV ({{ current_allowed|length }})</div>
+                    <div class="bg-[#0a0a0a] border border-[#222326] rounded p-3 min-h-[120px] text-sm" id="current-allowed-list">
+                        {% if current_allowed %}
+                            {% for gid in current_allowed %}
+                            <div class="flex items-center justify-between py-1 border-b border-[#1a1b1e] last:border-none">
+                                <span class="font-mono text-[#e6e6e6]">{{ gid }}</span>
+                                <button type="button" onclick="toggleGuild({{ gid }}, false)" class="text-xs px-2 py-0.5 border border-[#222326] hover:border-[#f4b942] text-[#f4b942]">remove</button>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <span class="text-[#8a8f98] text-xs">No guilds currently allowed (bot will respond in any server — not recommended)</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div>
+                    <div class="text-[10px] text-[#8a8f98] mb-2 font-mono">FROM LIVE SNAPSHOT (add these safely)</div>
+                    <div class="bg-[#0a0a0a] border border-[#222326] rounded p-3 max-h-[200px] overflow-auto text-sm space-y-1" id="addable-guilds">
+                        {% set allowed_set = current_allowed | list %}
+                        {% set snapshot_ids = guilds.guilds | map(attribute='id') | list %}
+                        <!-- Current allowed (including legacy not in snapshot) -->
+                        {% for gid in current_allowed %}
+                            {% set g = guilds.guilds | selectattr('id', '==', gid) | first %}
+                            <label class="flex items-center gap-x-2 cursor-pointer">
+                                <input type="checkbox" class="guild-checkbox" value="{{ gid }}" checked onchange="updatePlannedList()">
+                                <span class="font-mono text-[#e6e6e6]">{{ g.name if g else 'Guild ' ~ gid }} <span class="text-[#8a8f98]">({{ gid }})</span>{% if gid not in snapshot_ids %}<span class="text-[#f4b942] text-[10px] ml-1">(legacy)</span>{% endif %}</span>
+                            </label>
+                        {% endfor %}
+                        <!-- Connected not yet allowed -->
+                        {% for g in guilds.guilds %}
+                            {% if g.id not in allowed_set %}
+                            <label class="flex items-center gap-x-2 cursor-pointer">
+                                <input type="checkbox" class="guild-checkbox" value="{{ g.id }}" checked onchange="updatePlannedList()">
+                                <span class="font-mono text-[#67f6ff]">{{ g.name }} <span class="text-[#8a8f98]">({{ g.id }})</span></span>
+                            </label>
+                            {% endif %}
+                        {% endfor %}
+                        {% if not current_allowed and not guilds.guilds %}
+                            <span class="text-[#8a8f98] text-xs">No guilds in snapshot or current whitelist.</span>
+                        {% endif %}
+                    </div>
+
+                    <!-- Manual add -->
+                    <div class="mt-3 flex gap-2">
+                        <input id="manual-guild-id" type="text" placeholder="Add guild ID manually" class="flex-1 bg-[#0a0a0a] border border-[#222326] text-sm px-3 py-1 font-mono rounded focus:border-[#67f6ff]">
+                        <button type="button" onclick="addManualGuild()" class="px-3 py-1 text-xs border border-[#222326] hover:border-[#67f6ff] text-[#67f6ff]">Add ID</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4 flex items-center gap-3">
+                <button type="button" onclick="reviewAndSave()"
+                        class="px-5 py-2 bg-[#111214] border border-[#67f6ff] text-[#67f6ff] hover:bg-[#1a1b1e] text-sm font-mono rounded">
+                    REVIEW CHANGES &amp; SAVE
+                </button>
+                <div class="text-[10px] text-[#8a8f98] font-mono">All changes require bot restart to take effect.</div>
+            </div>
+        </form>
+    </div>
+
+    <div class="mt-4 text-[10px] text-[#8a8f98] font-mono px-1">
+        Changes are written safely with backup + verification. Only guilds visible in the current snapshot are suggested for addition.
+    </div>
+</div>
+
+<!-- Robust Confirmation Modal -->
+<div id="confirm-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50" onclick="if (event.target.id === 'confirm-modal') hideModal()">
+    <div class="card w-full max-w-lg mx-4 p-6" onclick="event.stopImmediatePropagation()">
+        <div class="font-mono text-xs text-[#8a8f98] tracking-[1px] mb-2">CONFIRM WHITELIST UPDATE</div>
+
+        <div id="modal-diff" class="bg-[#0a0a0a] border border-[#222326] rounded p-4 text-sm font-mono mb-4 max-h-[240px] overflow-auto">
+            <!-- populated by JS -->
+        </div>
+
+        <div class="space-y-2 mb-4 text-sm">
+            <label class="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" id="ack-diff" class="mt-1">
+                <span>I have reviewed the exact changes listed above.</span>
+            </label>
+            <label class="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" id="ack-restart" class="mt-1">
+                <span>I understand the Discord bot <strong>must be restarted</strong> for these changes to take effect. The currently running bot will continue using the old list until restarted.</span>
+            </label>
+        </div>
+
+        <div class="flex gap-3">
+            <button onclick="confirmAndSubmit()" id="confirm-btn"
+                    class="flex-1 px-4 py-2 bg-[#111214] border border-[#22ff88] text-[#22ff88] hover:bg-[#1a1b1e] disabled:opacity-50 font-mono text-sm" disabled>
+                CONFIRM &amp; SAVE TO .ENV
+            </button>
+            <button onclick="hideModal()" class="px-4 py-2 border border-[#222326] hover:border-[#8a8f98] text-sm font-mono">CANCEL</button>
+        </div>
+
+        <div class="mt-3 text-[10px] text-[#8a8f98] font-mono">
+            A timestamped backup will be created automatically. You can restore from .env.backup* if needed.
+        </div>
+    </div>
+</div>
+
+<script>
+    // Original allowed from server render (for diff calculation)
+    const ORIGINAL_ALLOWED = (document.querySelector('#access-control')?.dataset.originalAllowed || '{{ current_allowed|join(",") }}')
+        .split(',').map(x => parseInt(x.trim())).filter(Boolean);
+
+    function getCheckedGuildIds() {
+        const ids = new Set();
+        document.querySelectorAll('.guild-checkbox').forEach(cb => {
+            if (cb.checked) ids.add(parseInt(cb.value));
+        });
+        // Also include any that were in original but not rendered in checkboxes (legacy)
+        // For simplicity we rely on the checkboxes + manual
+        return Array.from(ids).sort((a,b)=>a-b);
+    }
+
+    function updatePlannedList() {
+        // Optional live preview could be added here
+    }
+
+    function toggleGuild(gid, shouldAdd) {
+        // For the current list remove buttons
+        const checkboxes = document.querySelectorAll('.guild-checkbox');
+        let found = false;
+        checkboxes.forEach(cb => {
+            if (parseInt(cb.value) === gid) {
+                cb.checked = shouldAdd;
+                found = true;
+            }
+        });
+        if (!found && !shouldAdd) {
+            // remove from any manual state if needed
+        }
+        updatePlannedList();
+    }
+
+    function addManualGuild() {
+        const input = document.getElementById('manual-guild-id');
+        const val = parseInt(input.value.trim());
+        if (!val || isNaN(val)) {
+            alert('Please enter a valid numeric guild ID.');
+            return;
+        }
+        // Add a temporary checkbox if not present
+        let container = document.querySelector('#access-control .bg-\\[\\#0a0a0a\\]');
+        if (!container) container = document.querySelector('#access-control');
+
+        let existing = document.querySelector(`.guild-checkbox[value="${val}"]`);
+        if (existing) {
+            existing.checked = true;
+        } else {
+            const label = document.createElement('label');
+            label.className = 'flex items-center gap-x-2 cursor-pointer mt-1';
+            label.innerHTML = `
+                <input type="checkbox" class="guild-checkbox" value="${val}" checked onchange="updatePlannedList()">
+                <span class="font-mono text-[#67f6ff]">${val} <span class="text-[#8a8f98]">(manual)</span></span>
+            `;
+            // append to the snapshot list area if possible
+            const listArea = document.querySelector('#access-control .bg-\\[\\#0a0a0a\\]');
+            if (listArea) listArea.appendChild(label);
+            else container.appendChild(label);
+        }
+        input.value = '';
+        updatePlannedList();
+    }
+
+    function reviewAndSave() {
+        const finalIds = getCheckedGuildIds();
+        const original = ORIGINAL_ALLOWED;
+
+        const added = finalIds.filter(id => !original.includes(id));
+        const removed = original.filter(id => !finalIds.includes(id));
+
+        let diffHtml = '<div class="text-[#8a8f98] text-xs mb-2">EXACT CHANGES TO ALLOWED_GUILD_IDS:</div>';
+
+        if (added.length === 0 && removed.length === 0) {
+            diffHtml += '<div class="text-[#22ff88]">No changes — current selection matches existing whitelist.</div>';
+        } else {
+            if (added.length) {
+                diffHtml += '<div class="text-[#22ff88] mb-1">+ ADD:</div>';
+                added.forEach(id => {
+                    const g = (window.__guildsData || []).find(x => x.id === id) || {name: 'Guild ' + id};
+                    diffHtml += `<div class="pl-2 text-[#e6e6e6]">+ ${g.name || ''} (${id})</div>`;
+                });
+            }
+            if (removed.length) {
+                diffHtml += '<div class="text-[#f4b942] mt-2 mb-1">- REMOVE:</div>';
+                removed.forEach(id => {
+                    diffHtml += `<div class="pl-2 text-[#e6e6e6]">- ID ${id}</div>`;
+                });
+            }
+        }
+
+        diffHtml += `<div class="mt-3 pt-3 border-t border-[#222326] text-[#8a8f98] text-xs">Final list will be: [${finalIds.join(', ')}]</div>`;
+
+        const modal = document.getElementById('confirm-modal');
+        document.getElementById('modal-diff').innerHTML = diffHtml;
+
+        // reset checkboxes
+        document.getElementById('ack-diff').checked = false;
+        document.getElementById('ack-restart').checked = false;
+        document.getElementById('confirm-btn').disabled = true;
+
+        // wire live enable
+        const enableBtn = () => {
+            const ok = document.getElementById('ack-diff').checked && document.getElementById('ack-restart').checked;
+            document.getElementById('confirm-btn').disabled = !ok;
+        };
+        document.getElementById('ack-diff').onchange = enableBtn;
+        document.getElementById('ack-restart').onchange = enableBtn;
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+
+        // store final for submit
+        window.__pendingGuildIds = finalIds;
+    }
+
+    function hideModal() {
+        const modal = document.getElementById('confirm-modal');
+        modal.classList.remove('flex');
+        modal.classList.add('hidden');
+    }
+
+    function confirmAndSubmit() {
+        const finalIds = window.__pendingGuildIds || [];
+        if (!finalIds.length && !confirm('You are about to set an empty whitelist (bot will respond in ANY server). Continue?')) {
+            return;
+        }
+        const hidden = document.getElementById('guild-ids-hidden');
+        hidden.value = JSON.stringify(finalIds);
+        hideModal();
+        document.getElementById('whitelist-form').submit();
+    }
+
+    // Init: make sure checkboxes reflect current_allowed
+    function initGuildCheckboxes() {
+        const original = ORIGINAL_ALLOWED;
+        document.querySelectorAll('.guild-checkbox').forEach(cb => {
+            const id = parseInt(cb.value);
+            cb.checked = original.includes(id);
+        });
+
+        // store guilds data for name lookup in modal
+        window.__guildsData = [];
+        {% for g in guilds.guilds %}
+        window.__guildsData.push({id: {{ g.id }}, name: "{{ g.name | replace('"', '\\"') }}"});
+        {% endfor %}
+    }
+
+    // Bootstrap
+    document.addEventListener('DOMContentLoaded', () => {
+        initGuildCheckboxes();
+        // attach update listener
+        document.querySelectorAll('.guild-checkbox').forEach(cb => cb.addEventListener('change', updatePlannedList));
+    });
+</script>
+{% endblock %}
