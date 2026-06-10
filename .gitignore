@@ -1,0 +1,186 @@
+# =============================================================================
+# Groksito Discord Bot — .gitignore
+# =============================================================================
+#
+# Purpose: Safely prepare the project for GitHub / public sharing.
+# This Discord bot (Python) stores live runtime state, learned skills,
+# conversation context, health metrics, and — most importantly — secrets
+# (Discord bot token + xAI/Grok API keys or OAuth tokens).
+#
+# ONLY real secrets, machine-generated caches, logs, and per-run data
+# are ignored. All source code, docs, tests, Dockerfiles, and templates
+# remain committed.
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Python bytecode, caches, and packaging artifacts
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Packaging / distribution
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# pip / installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# -----------------------------------------------------------------------------
+# Virtual environments
+# -----------------------------------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+.venv-*/
+venv-*/
+
+# -----------------------------------------------------------------------------
+# Secrets & local environment configuration (CRITICAL)
+# -----------------------------------------------------------------------------
+# Real tokens/keys must NEVER be committed.
+# .env contains DISCORD_BOT_TOKEN, XAI_API_KEY, and all runtime config.
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# Any other stray env files
+*.env
+
+# -----------------------------------------------------------------------------
+# Project runtime / persistent data (auto-created when bot runs)
+# -----------------------------------------------------------------------------
+# data/ holds live bot state that must not be committed:
+#   - bot_guilds.json, bot_health.json, bot_heartbeat.json, bot_stats.json
+#   - skills.json, emoji_knowledge.json, pantsu_context.json, etc.
+# The folder itself is kept in the repo via data/.gitkeep so the structure
+# exists for new clones. All actual .json content inside is ignored.
+data/
+!data/.gitkeep
+
+# OAuth token storage (written by the --login-oauth flow).
+# Contains xAI access/refresh tokens (xai_oauth_tokens.json).
+# Explicit directory ignore (more reliable than relying on *.json).
+oauth/
+
+# -----------------------------------------------------------------------------
+# Logs, temporary files, and scratch artifacts created while running
+# -----------------------------------------------------------------------------
+*.log
+logs/
+log/
+*.pid
+
+# One-off / debugging / temporary test scripts (common during development)
+tmp_*.py
+temp_*.py
+scratch*.py
+*_temp.py
+*_scratch.py
+*_test_output*
+*.tmp
+*.bak
+*.orig
+
+# -----------------------------------------------------------------------------
+# Testing, coverage, and quality tooling caches
+# -----------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# Linters / formatters
+.ruff_cache/
+.pyre/
+.pytype/
+
+# -----------------------------------------------------------------------------
+# IDE, editor, and local tooling
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# -----------------------------------------------------------------------------
+# OS-generated files
+# -----------------------------------------------------------------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+
+# -----------------------------------------------------------------------------
+# Docker local overrides (never commit machine-specific compose)
+# -----------------------------------------------------------------------------
+docker-compose.override.yml
+docker-compose.*.override.yml
+docker-compose.local.yml
+
+# -----------------------------------------------------------------------------
+# Miscellaneous generated / build artifacts
+# -----------------------------------------------------------------------------
+# Web / static build outputs (if any tooling ever produces them)
+web/static/dist/
+web/static/build/
+
+# Any future "out" or "generated" folders
+out/
+generated/
+# =============================================================================
