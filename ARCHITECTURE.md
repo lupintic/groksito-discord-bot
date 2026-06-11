@@ -1,6 +1,6 @@
 # Groksito Discord Bot — Architecture
 
-This document describes the current architecture of the standalone Groksito Discord bot.
+This document describes the current architecture of the standalone Groksito Discord bot, plus the target future (agentic) architecture that serves as the north star for the ongoing migration (see the Target section).
 
 ## Overview and Design Philosophy
 
@@ -112,6 +112,66 @@ All paths prefer native Grok behavior and reuse the same continuation mechanism 
 **Performance notes (Ticket #5):** The dominant latency/token source on normal @mentions was the unconditional `summarize_recent_conversation` pre-call (extra Responses roundtrip) in `llm_input.py:build_responses_input` for every `is_mentioned`/`is_reply_to_bot` (even plain timeless factual that classify minimal/normal). Gated behind a cheap local `should_generate_recent_summary` predicate (centralized in `intents.py`, reusing `is_conversation_meta_question` + `_has_recent_referent_intent` + modeled kw checks from `decision._heuristic_decision` + classify). Plain addressed timeless now skip the pre-call (and the decision force); raw fallback + native context + on-signal `get_recent_context` tool preserve quality. Matches best-practice: cheap local heuristics before expensive pre-LLM work; no change to model/prompts/caching story.
 
 **Agentic Phase 1 (Ticket #7):** Targeted incremental move toward more native tool reasoning on plain @mentions. Introduced `should_offer_light_decision_tools` (intents.py, reexported) + light vs heavy split in llm.py/tools.py: basic `respond_directly` + `get_recent_context` (small schemas) now offered on addressed non-extreme turns (normal/minimal); heavy (create/edit/use_skill + full) remain gated on strong signals only. Improved descriptions on decision tools (skill_tools.py) and native search (llm_utils.py) to better cue "prefer direct for timeless; search ONLY on clear fresh need". Reduced classification reliance for search offering: addressed "minimal" turns now surface native search schemas (model + respond_directly decide). Added lightweight [ADDRESSED] metrics in token_usage.py (latency, prompt_tokens, search_offered, chose_search/chose_direct, need) + call site in llm.py for addressed first-turn+loop (logs + small deque; no p95 yet). All changes minimal, reversible, safety-preserving; no new flags, no refactors out of scope. See tmp/grok-ticket7-impl-summary.md for measurements.
+
+See the [Target Agentic Architecture](#target-agentic-architecture-roadmap) section below for the intended end state and north star for future phases.
+
+## Target Agentic Architecture (Roadmap)
+
+**Vision**: Evolve Groksito toward a more agentic architecture similar to how Grok operates on the web — with less hardcoded logic and more native reasoning by the model itself.
+
+This is the living target document requested in #9. It defines the desired future state and serves as the reference for the migration. It is intentionally high-level on "how" (detailed tactics live in the phase tickets) and explicit about hard constraints that must never be compromised.
+
+### Core Goals
+- **Letting Grok reason more natively**: The model (not Python) decides high-level strategy on most turns — when to answer directly from knowledge, when fresh data is required, when to pull recent context, when (and how) to activate or create a skill, and which interaction primitive to use.
+- **Better use of MCP + Skills**: The existing lightweight skills system (natural-language instructions + explicit `allowed_tools` surface, user-approved or conservatively auto-created, injected only when selected) becomes the primary extension point for consistent/reusable behavior. Tools and schemas are shaped like clean, self-describing MCP-style interfaces so native reasoning transfers well. Longer-term, the architecture supports surfacing additional MCP-provided capabilities (e.g., GitHub, Notion, Docker admin, custom integrations) to the model under the same approval/sandbox model used for skills.
+- **Reducing manual classification and decision heuristics**: Deprecate or minimize the role of `classify_query_context_need`, the large keyword lists (`_SIMPLE_FACTUAL_HINTS`, `_FRESH_OR_TOOL_HINTS`, `STRONG_DIRECTED_*`, etc. in intents.py), and the heuristic paths in `skills/decision.py` and `llm.py` for normal decision-making and tool-offering. Retain only the minimal subset required for hard safety boundaries, spam/activation prevention, and true ultra-light extremes (pure casual greetings, pure first-turn image/video generation).
+- **Keeping Discord constraints in mind**: The bot must always reply in the correct channel or thread. Safety, rate-limit respect, and operational guardrails are non-negotiable. The target must not trade these for "more agentic" behavior.
+
+### Target End-State (High Level)
+- **Thin, stable Activation + Safety Layer (outside native reasoning)**: `client.py` (sole Gateway owner), activation logic in `conversation.py`, the activation subset of intents, `response_safety`, explicit-intent detectors for expensive operations (video, image gen/edit), guild allow-lists, and sandbox gating remain and are the *only* places where conservative Python-level decisions are expected. These enforce "wake only when addressed or strongly directed", "deliver every reply to the exact right place", "never offer power tools without explicit user intent + approved skill", and cost/rate safety. Inside an activated conversational turn, Grok drives almost everything via native tool calling.
+- **Inside an activated turn — native reasoning dominates**:
+  - Ultra-minimal `SYSTEM_PROMPT` (philosophy preserved and possibly further tightened).
+  - Native xAI tools (`web_search`, `x_search`) + a small, carefully described set of Groksito action tools are visible to the model on normal addressed turns. The model chooses via its own judgment, guided by excellent tool descriptions and the prompt rules ("use search *only* for clear fresh/time-sensitive needs; prefer direct on timeless/general knowledge").
+  - Recent conversation context and channel state are primarily on-demand tools rather than pre-injected (see #11).
+  - Key Discord interaction primitives are exposed as first-class, well-described native tools (generalized reply/send under the safety envelope — see #13) so the model can choose the right conversational action instead of having orchestration hardcoded in Python.
+  - Skill lifecycle (create, edit, use) is fully native tool-driven and seamless. Skills remain the auditable, opt-in mechanism for user-defined reusable behaviors on recurring fresh-data patterns.
+  - Classification and pre-decision heuristics are largely removed from the decision/tool-offering path for normal chat. The model sees the tools and decides. (Extreme lazy paths for pure image_gen and ultra-casual may still use minimal tiering.)
+  - Continuation rounds stay aggressively minimized via `previous_response_id`.
+- **Skills + MCP synergy**: Skills are "mini-programs" the model (or users via explicit requests) can author and activate. In the target they are the main way to give Grok persistent, consistent capabilities without baking logic into the core bot. All custom tools follow MCP-like conventions (clear names, rich descriptions with examples and constraints, explicit parameters, declared side-effect/privilege level). This makes native reasoning reliable. The same pattern enables future safe exposure of MCP servers to the running bot for extended operator or integration capabilities.
+- **Observability for native decisions**: Lightweight structured signals (tool choices, direct vs search vs skill, latency/token impact, rationale where available) are emitted on turns so we can measure the migration, debug reasoning quality, and expose useful views in the web dashboard (#15).
+- **Post-migration cleanup**: Once the target behaviors are stable and proven, the deprecated classification logic, pre-filters, old decision heuristics, and now-unused injection paths are removed (#16). The codebase becomes smaller and easier to reason about.
+
+### Hard Constraints That Must Be Preserved
+- **Correct delivery is absolute**: Every text reply or direct media delivery must land in the channel/thread the user addressed. This is enforced structurally by the Gateway owner in `client.py`, the reply/mention + referenced context paths in `conversation.py`, and the direct-delivery sentinel. The model never picks "which channel" in a way that could violate this.
+- **Safety & cost controls**: Guild allow-lists (`ALLOWED_GUILD_IDS`), per-user video quotas + optimistic early rejection, explicit-intent gates for all generation/editing, sandbox isolation for `code_execution` and `playwright_browser` (never offered outside an approved skill's `allowed_tools`), `response_safety` length guards, and no unsolicited background autonomy.
+- **Token and latency discipline**: Extreme laziness on first turns (most normal chat sees zero or tiny custom tool sets), continuation minimization, prompt-cache friendliness, and strong bias toward "direct on timeless" (expressed in tool descriptions + SYSTEM_PROMPT, not Python gatekeeping).
+- **No full autonomous agent loops**: The design stays turn-based and conversational. Skills provide scoped, visible, reusable behavior. We do not introduce long-running ReAct-style loops that could act without user visibility or burn resources.
+- **Activation heuristics for spam prevention stay (by design)**: Preventing replies to random user-to-user chatter is a core product and safety requirement. The activation subset of keyword/structure checks in `conversation.py` / intents is outside the "reduce manual heuristics" mandate.
+
+### Realization Path (Map to Current Open Tickets)
+The following open issues (labeled agentic/roadmap/technical-debt) are the concrete steps toward this target. They should be read alongside this document:
+
+- #10 Reduce Pre-filtering on Normal @mentions (Phase 1 continuation) — broaden when light decision tools are offered, relax classification gating where it unnecessarily limits the model.
+- #11 Make Recent Context Tool-Driven Instead of Pre-injected — move summarization / recent history behind an explicit `get_recent_context` tool; reduce unconditional pre-calls.
+- #12 Improve Tool Descriptions for Better Native Reasoning — high-leverage refinements to native search and decision tool schemas so Grok makes higher-quality choices.
+- #13 Expose Key Discord Actions as Native Tools — reply, send, and related primitives become clean tools the model can invoke naturally (while the activation/safety layer still guarantees correct delivery).
+- #14 Simplify and Deprecate Heavy Classification & Decision Logic — systematically reduce the custom keyword lists, `classify_query_context_need`, and heuristic pre-decisions that currently control too much behavior.
+- #15 Add Better Observability for Tool Decisions — logging/metrics so we can see what the model is choosing and why (search vs direct, skill use, etc.).
+- #16 Clean Up Deprecated Code After Agentic Migration — final removal of the old classification/decision scaffolding once the native paths are proven.
+
+Significant work in any of the above should also produce a short update to the "current" description in this document and a note of progress against the target.
+
+### Non-Goals / Explicit Boundaries
+- Do not remove or weaken the activation policy that protects against replying to non-addressed chatter.
+- Do not introduce autonomous background tasks or long-running agents.
+- Do not expose privileged actions (power tools, cross-guild actions, etc.) without the existing approval + sandbox + explicit-intent layers.
+- Do not sacrifice Discord length, rate, or ToS compliance for "more agentic" feel.
+- Keep the bot fully standalone for its core conversational role (no external monorepo dependency for the hot path).
+
+### Maintenance
+This section is living. After each phase lands, reconcile the "current architecture" description with reality and record what was achieved toward the target. Any fundamental change to the safety/activation boundary, persistence model, privileged execution, or request flow requires an update here in addition to the normal code/docs changes.
+
+Update this document when adding or significantly refactoring major components (new top-level packages, fundamental changes to the request flow, new privileged subsystems, etc.).
 
 ## Key Design Principles
 
