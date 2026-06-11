@@ -36,6 +36,7 @@ from ..intents import (
     is_conversation_meta_question,
     is_pure_image_generation_request,
     should_generate_recent_summary,
+    should_offer_light_decision_tools,
 )
 
 logger = logging.getLogger("groksito.context")

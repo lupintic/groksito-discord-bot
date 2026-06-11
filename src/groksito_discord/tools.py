@@ -298,6 +298,7 @@ def get_continuation_tools(
     has_explicit_audio_intent: bool = False,
     offer_create_skill_tool: bool = False,  # accepted for API compatibility but ignored on continuations (creation is first-turn meta)
     offer_decision_tools: bool = False,  # accepted for API compatibility but ignored on continuations (decision tools are first-turn only)
+    offer_light_decision_tools: bool = False,  # accepted for compat; never on cont
 ) -> list[dict]:
     """
     Highly optimized custom tool set for continuation rounds
@@ -467,6 +468,7 @@ def get_tools_for_request(
     pure_image_gen: bool = False,
     offer_create_skill_tool: bool = False,
     offer_decision_tools: bool = False,
+    offer_light_decision_tools: bool = False,
 ) -> list[dict]:
     """
     Main entry point for tool selection. Now supports lazy/dynamic offering + ultra-light for image gen.
@@ -494,6 +496,7 @@ def get_tools_for_request(
             has_explicit_video_intent=has_explicit_video_intent,
             has_explicit_audio_intent=has_explicit_audio_intent,
             offer_decision_tools=False,
+            offer_light_decision_tools=False,
         )
 
     # === ULTRA-AGGRESSIVE "image_gen" MODE (Opción 1) ===
@@ -536,7 +539,7 @@ def get_tools_for_request(
     if query_need == "casual":
         return []
 
-    if query_need in ("minimal", "image_gen") and not has_visual_intent:
+    if query_need in ("minimal", "image_gen") and not has_visual_intent and not offer_light_decision_tools and not offer_decision_tools:
         return []
 
     # Build custom tools. No internal search or channel history tools (removed for simplification).
@@ -570,6 +573,14 @@ def get_tools_for_request(
             tools.append(_edit_skill_schema())
             tools.append(_get_recent_context_schema())
             tools.append(_use_skill_schema())
+            tools.append(_respond_directly_schema())
+        except Exception:
+            pass
+    elif offer_light_decision_tools:
+        # Light decision only (plain addressed normal/minimal): the two small schemas only.
+        # Keeps schema size under control; heavy (create/edit/use) stay behind strong signals.
+        try:
+            tools.append(_get_recent_context_schema())
             tools.append(_respond_directly_schema())
         except Exception:
             pass

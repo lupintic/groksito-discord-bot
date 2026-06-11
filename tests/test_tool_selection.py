@@ -148,3 +148,64 @@ class TestContinuationToolMinimization:
         assert "generate_video" not in _tool_names(heavy_no_video)
 
 
+class TestLightDecisionOffer:
+    """Ticket #7 Phase 1: light decision (respond+get_recent only) on plain addressed normal/minimal without strong signals.
+    Full heavy (create/edit/use) only on offer_decision_tools (strong signals). No bloat on plain addressed.
+    """
+
+    def test_light_decision_on_normal_offers_only_respond_and_recent(self, patch_video_enabled):
+        patch_video_enabled(True)
+        tools = get_tools_for_request(
+            query_need="normal",
+            has_visual_intent=False,
+            offer_light_decision_tools=True,
+            offer_decision_tools=False,
+        )
+        names = _tool_names(tools)
+        assert "respond_directly" in names
+        assert "get_recent_context" in names
+        # no heavy bloat
+        assert "create_skill" not in names
+        assert "edit_skill" not in names
+        assert "use_skill" not in names
+        # other core not forced here
+        assert len(names) <= 2
+
+    def test_full_decision_still_offers_heavy(self, patch_video_enabled):
+        patch_video_enabled(True)
+        tools = get_tools_for_request(
+            query_need="normal",
+            has_visual_intent=False,
+            offer_light_decision_tools=False,
+            offer_decision_tools=True,
+        )
+        names = _tool_names(tools)
+        assert "respond_directly" in names
+        assert "get_recent_context" in names
+        assert "create_skill" in names
+        assert "edit_skill" in names
+        assert "use_skill" in names
+
+    def test_light_on_minimal_addressed_sim(self, patch_video_enabled):
+        patch_video_enabled(True)
+        tools = get_tools_for_request(
+            query_need="minimal",
+            has_visual_intent=False,
+            offer_light_decision_tools=True,
+        )
+        names = _tool_names(tools)
+        assert "respond_directly" in names
+        assert "get_recent_context" in names
+        assert "create_skill" not in names
+
+    def test_no_light_when_not_offered(self, patch_video_enabled):
+        patch_video_enabled(True)
+        tools = get_tools_for_request(
+            query_need="normal",
+            has_visual_intent=False,
+            offer_light_decision_tools=False,
+            offer_decision_tools=False,
+        )
+        names = _tool_names(tools)
+        assert "respond_directly" not in names
+        assert "get_recent_context" not in names

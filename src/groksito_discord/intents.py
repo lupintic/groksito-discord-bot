@@ -538,6 +538,27 @@ def should_generate_recent_summary(
     return False
 
 
+def should_offer_light_decision_tools(
+    text: str,
+    is_mentioned: bool = False,
+    is_reply_to_bot: bool = False,
+    context_need: str = "normal",
+) -> bool:
+    """Cheap pure predicate: offer light decision tools (respond_directly + get_recent_context) on addressed turns (plain @mentions/replies) unless ultra-casual or image_gen.
+
+    Heavy schemas (create/edit/use) remain gated on strong signals (creation_candidate etc) in llm.py.
+    Reuses is_addressed + context_need logic like should_generate_recent_summary; small to avoid cycles.
+    """
+    if not text:
+        return False
+    is_addressed = bool(is_mentioned or is_reply_to_bot)
+    if not is_addressed:
+        return False
+    if context_need in ("casual", "image_gen"):
+        return False
+    return True
+
+
 def is_pure_image_generation_request(text: str) -> bool:
     """
     Stricter + broader detector for explicit *pure text-to-image generation* requests
