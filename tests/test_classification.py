@@ -14,6 +14,7 @@ import asyncio
 from groksito_discord.context import (
     classify_query_context_need,
     is_pure_image_generation_request,
+    should_generate_recent_summary,
 )
 from groksito_discord.llm_utils import _detect_image_creation_intent
 from groksito_discord.conversation import (
@@ -127,6 +128,37 @@ class TestStrongDirectedReplyIntent:
     def test_constants_are_non_empty(self):
         assert len(STRONG_DIRECTED_KEYWORDS) > 5
         # The test helper script in root also exercises this set
+
+
+class TestRecentSummaryGating:
+    """Gating predicate for recent conv summary (perf optimization on plain @mentions).
+
+    Plain addressed timeless factual/minimal/normal now skip the pre-call.
+    Meta, referent, fresh signals, rich still force it. Matches decision/classify heuristics.
+    """
+
+    def test_plain_addressed_factual_timeless_skips(self):
+        # Core win: no referent/recency/fresh -> skip (even on is_mentioned / reply_to_bot)
+        assert should_generate_recent_summary("cuál es la capital de francia?", is_mentioned=True) is False
+        assert should_generate_recent_summary("quién es einstein?", is_mentioned=True, context_need="minimal") is False
+        assert should_generate_recent_summary("capital de españa?", is_reply_to_bot=True) is False
+        assert should_generate_recent_summary("cómo funciona la recursión en python", is_mentioned=True, context_need="normal") is False
+
+    def test_meta_forces_summary_generation(self):
+        assert should_generate_recent_summary("de qué estaban hablando antes?", is_mentioned=True) is True
+        assert should_generate_recent_summary("qué pasó en la charla?", is_mentioned=False) is True  # meta alone triggers
+
+    def test_referent_or_fresh_or_rich_or_x_forces(self):
+        # strong referent language
+        assert should_generate_recent_summary("qué dijo el usuario arriba?", is_mentioned=True) is True
+        assert should_generate_recent_summary("la imagen del user", is_reply_to_bot=True) is True
+        # fresh/recency on addressed
+        assert should_generate_recent_summary("qué pasó con el dólar hoy", is_mentioned=True) is True
+        assert should_generate_recent_summary("latest player count", is_mentioned=True) is True
+        # rich need
+        assert should_generate_recent_summary("explica el contexto anterior", is_mentioned=True, context_need="rich") is True
+        # has_x on addressed
+        assert should_generate_recent_summary("analiza esto", is_mentioned=True, has_x_link_intent=True) is True
 
 
 # (search tests removed)

@@ -35,6 +35,7 @@ from .media_tools import has_explicit_video_intent, has_explicit_audio_intent
 
 # Import from the new sibling modules (clean separation)
 from .llm_input import build_responses_input
+from .context import should_generate_recent_summary
 from .llm_utils import (
     _extract_final_text,
     _build_stub_response,
@@ -356,7 +357,20 @@ async def call_grok_for_groksito(
             pass
 
         # Honor decision layer's opinion on recent context (lightweight nudge)
-        if decision and getattr(decision, "needs_recent_context", False) and not input_data.get("recent_context_block"):
+        # Gated by the same cheap predicate (perf fix): plain normal addressed timeless
+        # now skip the force-summary too (decision heuristic sets needs_recent on any addressed).
+        if (
+            decision
+            and getattr(decision, "needs_recent_context", False)
+            and not input_data.get("recent_context_block")
+            and should_generate_recent_summary(
+                user_message_text,
+                is_mentioned=is_mentioned,
+                is_reply_to_bot=is_reply_to_bot,
+                context_need=need,
+                has_x_link_intent=has_x_link_intent,
+            )
+        ):
             try:
                 from .context.context_summarizer import summarize_recent_conversation, format_recent_context_block
                 summary = await summarize_recent_conversation(channel_id)

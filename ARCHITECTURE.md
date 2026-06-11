@@ -109,6 +109,8 @@ Additional integrations can be added in the same package.
 
 All paths prefer native Grok behavior and reuse the same continuation mechanism (`previous_response_id`).
 
+**Performance notes (Ticket #5):** The dominant latency/token source on normal @mentions was the unconditional `summarize_recent_conversation` pre-call (extra Responses roundtrip) in `llm_input.py:build_responses_input` for every `is_mentioned`/`is_reply_to_bot` (even plain timeless factual that classify minimal/normal). Gated behind a cheap local `should_generate_recent_summary` predicate (centralized in `intents.py`, reusing `is_conversation_meta_question` + `_has_recent_referent_intent` + modeled kw checks from `decision._heuristic_decision` + classify). Plain addressed timeless now skip the pre-call (and the decision force); raw fallback + native context + on-signal `get_recent_context` tool preserve quality. Matches best-practice: cheap local heuristics before expensive pre-LLM work; no change to model/prompts/caching story.
+
 ## Key Design Principles
 
 - **Modular LLM split**: `llm_input.py` is the single source of truth for input construction. This eliminated previous duplication bugs and makes prompt-caching strategy explicit.

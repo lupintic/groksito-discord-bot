@@ -431,6 +431,113 @@ def is_conversation_meta_question(text: str) -> bool:
     return False
 
 
+def should_generate_recent_summary(
+    text: str,
+    is_mentioned: bool = False,
+    is_reply_to_bot: bool = False,
+    context_need: str = "normal",
+    has_x_link_intent: bool = False,
+) -> bool:
+    """
+    Cheap, pure, local predicate (no I/O, no LLM) to gate the expensive
+    pre-call to summarize_recent_conversation on plain @mentions / replies.
+
+    Returns True only for: explicit meta questions, strong recent referent
+    language (via centralized helper), rich need, addressed + (has_x or
+    fresh/recency signals), or recent_kw patterns.
+
+    Plain addressed normal/minimal timeless factual questions (e.g. "qué es X",
+    "capital de Francia?") with no recency referent return False. This skips
+    the extra full Responses API call + summary tokens on the main prompt
+    for the common case, while preserving raw fallback + native context +
+    get_recent_context tool for coherence.
+
+    Follows project patterns exactly:
+    - Keyword-driven, defensive (early returns, no assume text).
+    - Reuses is_conversation_meta_question + _has_recent_referent_intent
+      (centralized in this file).
+    - Small duplicated kw lists (~lines from decision._heuristic_decision
+      and classify + _FRESH_OR_TOOL_HINTS) to avoid import cycles / deps.
+    - Ultra-minimal, no new config, no behavior change for meta/referent cases.
+    - Testable (used by test_classification.py assertions).
+    """
+    if not text:
+        return False
+    t = text.lower()
+    is_addressed = bool(is_mentioned or is_reply_to_bot)
+
+    # Preserve the original base trigger (addressed or meta) but refine it.
+    base_trigger = is_addressed or is_conversation_meta_question(text)
+    if not base_trigger:
+        return False
+
+    if is_conversation_meta_question(text):
+        return True
+
+    if _has_recent_referent_intent(text):
+        return True
+
+    if context_need in ("rich",):
+        return True
+
+    if has_x_link_intent and is_addressed:
+        return True
+
+    # Recent kw checks modeled *exactly* on decision.py:_heuristic_decision
+    recent_kw = (
+        "antes",
+        "dijimos",
+        "hablábamos",
+        "qué pasó",
+        "continúa",
+        "de qué",
+        "resumen de la",
+        "la charla",
+        "tema anterior",
+    )
+    if any(k in t for k in recent_kw):
+        return True
+
+    # Fresh/recency signals modeled on decision._heuristic + classify
+    # _has_fresh_or_tool_signal + the centralized _FRESH_OR_TOOL_HINTS.
+    # Duplicated small list (per plan: avoid cycles, keep diff tiny).
+    fresh_signals = (
+        "hoy",
+        "ahora",
+        "actual",
+        "en este momento",
+        "en vivo",
+        "live",
+        "breaking",
+        "última hora",
+        "latest",
+        "reciente",
+        "recientes",
+        "controvers",
+        "polémica",
+        "problemas",
+        "issues",
+        "drama",
+        "scandal",
+        "qué pasó",
+        "what happened",
+        "recent",
+        "novedades",
+        "pasa con",
+        "pasó con",
+    )
+    if is_addressed and any(k in t for k in fresh_signals):
+        return True
+    if is_addressed and any(k in t for k in _FRESH_OR_TOOL_HINTS):
+        return True
+
+    # Plain addressed + (normal or minimal) + timeless (no signals above) -> skip pre-summary.
+    # Let model use: native long context + [R:] ref (when applicable) + raw fallback
+    # (already in _maybe_inject_raw_recent_fallback for is_mentioned) + get_recent_context
+    # tool (offered only on signal-rich turns per llm.py offer_decision_tools).
+    return False
+
+
 def is_pure_image_generation_request(text: str) -> bool:
     """
     Stricter + broader detector for explicit *pure text-to-image generation* requests
