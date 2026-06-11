@@ -17,7 +17,13 @@ from typing import Any
 
 from .correlation import cid_prefix
 
-from openai import AsyncOpenAI, RateLimitError, APIError, APITimeoutError, APIConnectionError
+from openai import (
+    AsyncOpenAI,
+    RateLimitError,
+    APIError,
+    APITimeoutError,
+    APIConnectionError,
+)
 
 from .config import settings
 from .prompt import SUMMARIZATION_PROMPT
@@ -166,8 +172,8 @@ def _build_native_search_tools(
 
     # Normalize for lightweight signal detection (to decide web vs x independently, saving tokens
     # by not sending unnecessary tool descriptions when only one is relevant).
-    q = unicodedata.normalize('NFKD', (query_text or '').lower())
-    q = ''.join(c for c in q if not unicodedata.combining(c))
+    q = unicodedata.normalize("NFKD", (query_text or "").lower())
+    q = "".join(c for c in q if not unicodedata.combining(c))
 
     # STRICTER X-SPECIFIC SIGNAL DETECTION (refinement pass for even fewer x_search offers):
     # Goal: offer the x_search tool schema (and its result payloads) ONLY on *clear, unambiguous*
@@ -196,12 +202,20 @@ def _build_native_search_tools(
     #   or per-word tokenization. "Nativo" preserved: Grok decides calls; we only control
     #   expensive schema presence. Signals used *only* for token-saving schema decisions.
     x_signals = [
-        "tweet", "tweets",                   # core X terminology (very strong, safe signal)
-        "x.com", "twitter.com", "twitter",   # direct links + mentions (covers "en twitter" etc.)
-        "trending",                          # English "trending" is highly X-specific
-        "en tendencia",                      # precise Spanish X phrasing (replaces noisy bare "tendencia")
-        "este tweet", "el tweet", "tweet de", "tweets sobre",  # tweet-specific reply phrasing
-        "post en x", "posts en x", "post de x",  # only qualified "post" that mention the platform
+        "tweet",
+        "tweets",  # core X terminology (very strong, safe signal)
+        "x.com",
+        "twitter.com",
+        "twitter",  # direct links + mentions (covers "en twitter" etc.)
+        "trending",  # English "trending" is highly X-specific
+        "en tendencia",  # precise Spanish X phrasing (replaces noisy bare "tendencia")
+        "este tweet",
+        "el tweet",
+        "tweet de",
+        "tweets sobre",  # tweet-specific reply phrasing
+        "post en x",
+        "posts en x",
+        "post de x",  # only qualified "post" that mention the platform
         # (broad social phrases removed; see comment above for rationale + how X cases remain covered)
     ]
     include_x = any(sig in q for sig in x_signals)
@@ -214,17 +228,34 @@ def _build_native_search_tools(
     # Uses bounded (non-alpha adjacent) matching so "ahora" does not match "hora", "paso" etc.
     if not include_x and "en x" in q:
         false_time_or_other = [
-            "minuto", "minutos", "hora", "horas", "dia", "días", "día", "segundo", "segundos",
-            "vez", "veces", "ocasión", "version", "versión", "formato", "punto", "caso",
+            "minuto",
+            "minutos",
+            "hora",
+            "horas",
+            "dia",
+            "días",
+            "día",
+            "segundo",
+            "segundos",
+            "vez",
+            "veces",
+            "ocasión",
+            "version",
+            "versión",
+            "formato",
+            "punto",
+            "caso",
         ]
+
         def _has_bounded(needle: str, hay: str) -> bool:
             if needle not in hay:
                 return False
             idx = hay.find(needle)
-            before = hay[idx-1] if idx > 0 else " "
+            before = hay[idx - 1] if idx > 0 else " "
             after = hay[idx + len(needle)] if idx + len(needle) < len(hay) else " "
             # true only if the occurrence is bounded by non-letters (word-like boundary)
             return not before.isalpha() and not after.isalpha()
+
         if not any(_has_bounded(fp, q) for fp in false_time_or_other):
             # Accept as X platform signal (weak but useful). This is the main path for
             # "qué dicen en x ...", "reacciones/opiniones en x", "novedades en x", "pasa en x" etc.
@@ -234,9 +265,40 @@ def _build_native_search_tools(
     # For broad offering on normal/rich: include web by default.
     # But for pure X-specific (no general fresh keywords) and not rich: offer only x_search to save
     # the web description tokens (~90 tokens).
-    general_keywords = ["hoy", "ahora", "actual", "última", "ayer", "anoche", "reciente",
-                        "noticia", "noticias", "news", "breaking", "precio", "precios", "dólar",
-                        "busca", "search", "clima", "partido", "en vivo", "pasó", "paso"]
+    general_keywords = [
+        "hoy",
+        "ahora",
+        "actual",
+        "última",
+        "ayer",
+        "anoche",
+        "reciente",
+        "noticia",
+        "noticias",
+        "news",
+        "breaking",
+        "precio",
+        "precios",
+        "dólar",
+        "busca",
+        "search",
+        "clima",
+        "partido",
+        "en vivo",
+        "pasó",
+        "paso",
+        "latest",
+        "recientes",
+        "controvers",
+        "polémica",
+        "problemas",
+        "issues",
+        "drama",
+        "scandal",
+        "qué pasó",
+        "what happened",
+        "recent",
+    ]
     has_general = any(kw in q for kw in general_keywords)
     include_web = True
     if include_x and not has_general and context_need != "rich":
@@ -259,9 +321,7 @@ def _build_native_search_tools(
                 "'dólar blue hoy Argentina site:ambito.com' or 'resultado boca river live' — never broad 'dólar' or 'partido').\n"
                 "- From results: extract and retain *AT MOST the 1-2 most relevant facts or data points*. "
                 "Immediately discard ads, nav, related stories, full pages, boilerplate, and anything not directly answering.\n"
-                "- FINAL ANSWER SYNTHESIS RULE (critical): the searched info must contribute *at most 1 crisp sentence* "
-                "(or 1 tiny bullet if user explicitly wanted a list). State as established fact. Optional tiny (source). "
-                "NEVER: quote excerpts, list multiple results, repeat the query, explain that you searched, show alternatives considered, or let search increase overall answer length.\n"
+                "- FINAL ANSWER SYNTHESIS RULE (critical): provide the key relevant facts in natural, complete prose (a short paragraph is appropriate and useful for substantive/fresh topics). Stay crisp and direct, no quoting raw results, no meta 'I searched', optional (source) only when credibility key. Goal remains low bloat but usefulness first for normal/medium questions.\n"
                 "Internal reasoning over results must stay minimal and invisible to user. Goal: freshest facts, lowest possible token cost."
             ),
         }
@@ -278,8 +338,7 @@ def _build_native_search_tools(
                 "EFFICIENT USAGE (MANDATORY - X result sets are especially verbose; this is a major token lever):\n"
                 "- Use *only* when query is explicitly about X activity (do not default here for general 'qué opinan' or 'qué dicen').\n"
                 "- From results: keep *AT MOST 1-2 posts/reactions* (the most on-point). Discard noise, duplicates, low-signal replies, full threads, and timelines immediately.\n"
-                "- FINAL ANSWER SYNTHESIS RULE (strict): distill to *1 short sentence or 1-2 word summary of prevailing sentiment/fact*. Optional minimal source. "
-                "NEVER paste posts, usernames, raw text, multiple conflicting items, or 'here is what X is saying...'. Do not let X results inflate answer length or add meta/reasoning.\n"
+                "- FINAL ANSWER SYNTHESIS RULE (strict): provide the key relevant facts or sentiment in natural, complete prose (short paragraph fine for meaty fresh topics); stay crisp, no quoting raw results/posts, no meta 'I searched', optional (source) only when key. Usefulness first for normal questions while avoiding bloat.\n"
                 "Combine with web_search only when both genuinely add unique value. Internal use of results must be invisible."
             ),
         }
@@ -288,9 +347,7 @@ def _build_native_search_tools(
     enable_image_understanding = False
 
     visual_signal = (
-        has_visual_intent
-        or has_attached_images
-        or _detect_visual_intent(query_text)
+        has_visual_intent or has_attached_images or _detect_visual_intent(query_text)
     )
 
     if visual_signal:
@@ -301,7 +358,21 @@ def _build_native_search_tools(
         enable_image_understanding = True
 
         qq = (query_text or "").lower()
-        if any(kw in qq for kw in ("imágenes", "imagenes", "fotos", "pictures", "images of", "muéstrame", "show me images", "fotos de", "imágenes de", "busca imágenes")):
+        if any(
+            kw in qq
+            for kw in (
+                "imágenes",
+                "imagenes",
+                "fotos",
+                "pictures",
+                "images of",
+                "muéstrame",
+                "show me images",
+                "fotos de",
+                "imágenes de",
+                "busca imágenes",
+            )
+        ):
             enable_image_search = True
 
     if include_web:
@@ -319,7 +390,9 @@ def _build_native_search_tools(
     return tools
 
 
-def _infer_tools_set_name(query_need: str, has_visual_intent: bool, is_continuation: bool) -> str:
+def _infer_tools_set_name(
+    query_need: str, has_visual_intent: bool, is_continuation: bool
+) -> str:
     """Produces a short, consistent label for the custom tool set used (for logging)."""
     if is_continuation:
         return "continuation-visual" if has_visual_intent else "continuation-minimal"
@@ -350,7 +423,9 @@ def _extract_and_log_token_usage(
             usage = response.get("usage")
 
         if not usage:
-            logger.debug(f"{cid_prefix()}[TOKENS] No usage object found on response for category={category}")
+            logger.debug(
+                f"{cid_prefix()}[TOKENS] No usage object found on response for category={category}"
+            )
             return
 
         prompt = 0
@@ -376,7 +451,9 @@ def _extract_and_log_token_usage(
             total = usage.get("total_tokens", prompt + completion)
 
         if prompt == 0 and completion == 0:
-            logger.debug(f"{cid_prefix()}[TOKENS] Usage object found but no token numbers for category={category}")
+            logger.debug(
+                f"{cid_prefix()}[TOKENS] Usage object found but no token numbers for category={category}"
+            )
             return
 
         cached = 0
@@ -434,22 +511,29 @@ def _extract_and_log_token_usage(
                     **cache_context,
                 )
             except Exception as cache_log_err:
-                logger.debug(f"{cid_prefix()}[CACHE] metrics logging failed: {cache_log_err}")
+                logger.debug(
+                    f"{cid_prefix()}[CACHE] metrics logging failed: {cache_log_err}"
+                )
 
         # Observability for the frequent "128" reports: with our extreme-light prefixes (tiny sys + zero ctx on most turns)
         # the effective cacheable stable prefix is often exactly one 128-token block. This is *expected normal behavior*
         # of xAI prompt cache block granularity + our "maximum nativeness / ultra-light" choices (not a bug or stuck counter).
         # Extraction is now more accurate (supports both details shapes + guards). Log at debug for visibility.
         if cached == 128 and prompt < 300:
-            logger.debug(f"{cid_prefix()}[TOKENS] cached=128 (normal min-block granularity for light prefix) prompt={prompt} cat={category}")
+            logger.debug(
+                f"{cid_prefix()}[TOKENS] cached=128 (normal min-block granularity for light prefix) prompt={prompt} cat={category}"
+            )
 
     except Exception as err:
-        logger.warning(f"{cid_prefix()}[TOKENS] Exception while extracting usage: {err}")
+        logger.warning(
+            f"{cid_prefix()}[TOKENS] Exception while extracting usage: {err}"
+        )
 
 
 # =============================================================================
 # Lightweight Responses API resilience (for main conversational calls + optional summary)
 # =============================================================================
+
 
 async def _call_responses_with_retry(client: AsyncOpenAI, **kwargs) -> Any:
     """
@@ -474,7 +558,9 @@ async def _call_responses_with_retry(client: AsyncOpenAI, **kwargs) -> Any:
             return await client.responses.create(**kwargs)
         except (RateLimitError, APITimeoutError, APIConnectionError) as e:
             if attempt == max_attempts:
-                logger.warning(f"{cid_prefix()}[LLM][RETRY] Transient error after {max_attempts} attempts: {type(e).__name__} (exhausted)")
+                logger.warning(
+                    f"{cid_prefix()}[LLM][RETRY] Transient error after {max_attempts} attempts: {type(e).__name__} (exhausted)"
+                )
                 raise
             # Full jitter: random delay in [0, base * 2**(attempt-1)] — recommended to avoid thundering herd on rate limits
             raw_delay = base_delay * (2 ** (attempt - 1))
@@ -529,7 +615,9 @@ async def _maybe_proactive_summarize(
         if estimated_tokens < threshold:
             return
 
-        older_messages = get_messages_for_summarization(channel_id, keep_recent=keep_recent)
+        older_messages = get_messages_for_summarization(
+            channel_id, keep_recent=keep_recent
+        )
         if not older_messages or len(older_messages) < 5:
             return
 
@@ -545,9 +633,14 @@ async def _maybe_proactive_summarize(
             input=[
                 {
                     "role": "system",
-                    "content": SUMMARIZATION_PROMPT.format(conversation_text=conversation_text),
+                    "content": SUMMARIZATION_PROMPT.format(
+                        conversation_text=conversation_text
+                    ),
                 },
-                {"role": "user", "content": "Resume los mensajes antiguos de forma concisa y útil."},
+                {
+                    "role": "user",
+                    "content": "Resume los mensajes antiguos de forma concisa y útil.",
+                },
             ],
         )
 
@@ -555,7 +648,10 @@ async def _maybe_proactive_summarize(
         if not summary_text or len(summary_text) < 30:
             return
 
-        if "sin información" in summary_text.lower() or "sin contenido" in summary_text.lower():
+        if (
+            "sin información" in summary_text.lower()
+            or "sin contenido" in summary_text.lower()
+        ):
             return
 
         update_channel_summary(channel_id, summary_text)
@@ -571,4 +667,6 @@ async def _maybe_proactive_summarize(
         )
 
     except Exception as e:
-        logger.warning(f"{cid_prefix()}[CONTEXT] Proactive summarization failed for channel {channel_id}: {e}")
+        logger.warning(
+            f"{cid_prefix()}[CONTEXT] Proactive summarization failed for channel {channel_id}: {e}"
+        )

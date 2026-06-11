@@ -18,7 +18,7 @@ import logging
 import time
 import unicodedata
 from collections import defaultdict, deque
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,7 @@ from ..intents import (
     _SIMPLE_FACTUAL_HINTS,
     _CASUAL_CHAT_HINTS,
     _COMPLEX_OR_PERSONAL_HINTS,
+    _FRESH_OR_TOOL_HINTS,
     is_conversation_meta_question,
     is_pure_image_generation_request,
 )
@@ -81,8 +82,12 @@ def update_channel_summary(channel_id: int, new_summary: str) -> None:
         return
     _channel_summaries[channel_id]["summary"] = new_summary.strip()[:600]
     _channel_summaries[channel_id]["last_updated"] = time.time()
-    _channel_summaries[channel_id]["message_count_at_update"] = len(_channel_histories.get(channel_id, []))
-    logger.info(f"{cid_prefix()}[Context] Updated channel summary for {channel_id} ({len(new_summary)} chars)")
+    _channel_summaries[channel_id]["message_count_at_update"] = len(
+        _channel_histories.get(channel_id, [])
+    )
+    logger.info(
+        f"{cid_prefix()}[Context] Updated channel summary for {channel_id} ({len(new_summary)} chars)"
+    )
 
 
 # =============================================================================
@@ -91,6 +96,7 @@ def update_channel_summary(channel_id: int, new_summary: str) -> None:
 # Reuses the existing context persistence (no new files). Only today's count is
 # relevant; we filter on load/save. Increment is optimistic (before API call)
 # for minimal code. Videos are rare so save on every change is fine.
+
 
 def get_video_quota(user_id: int) -> tuple[int, int]:
     """Return (used_today, remaining). Never negative remaining."""
@@ -121,13 +127,17 @@ def _get_context_file_path() -> Path:
         # Defensive: if misconfigured to a directory (or no .json), fall back to standard file under data_dir
         if p.is_dir() or p.suffix.lower() != ".json":
             fallback = settings.data_dir / "pantsu_context.json"
-            logger.warning(f"[Context] context_file resolved to non-file {p}, using fallback {fallback}")
+            logger.warning(
+                f"[Context] context_file resolved to non-file {p}, using fallback {fallback}"
+            )
             return fallback
         return p
     except Exception as e:
         # Default filename kept for data compat (legacy pantsu name)
         fallback = Path.cwd() / "data" / "pantsu_context.json"
-        logger.error(f"[Context] Error resolving context_file, using safe fallback {fallback}: {e}")
+        logger.error(
+            f"[Context] Error resolving context_file, using safe fallback {fallback}: {e}"
+        )
         return fallback
 
 
@@ -140,10 +150,14 @@ def _load_context() -> None:
         # Ensure parent exists (in case data dir was removed externally)
         path.parent.mkdir(parents=True, exist_ok=True)
     except PermissionError as e:
-        logger.error(f"[Context] Cannot create context directory {path.parent}: {e}. Persistence will be disabled for this run.")
+        logger.error(
+            f"[Context] Cannot create context directory {path.parent}: {e}. Persistence will be disabled for this run."
+        )
         return
     except Exception as e:
-        logger.warning(f"[Context] Unexpected error ensuring context dir {path.parent}: {e}")
+        logger.warning(
+            f"[Context] Unexpected error ensuring context dir {path.parent}: {e}"
+        )
 
     if not path.exists():
         logger.debug(f"No context file yet: {path}")
@@ -186,11 +200,17 @@ def _load_context() -> None:
             if today in qdata and qdata[today] > 0:
                 _video_quotas[uid] = {today: qdata[today]}
 
-        logger.info(f"{cid_prefix()}✅ Context loaded from {path} (channels={len(_channel_histories)}, users={len(_user_profiles)})")
+        logger.info(
+            f"{cid_prefix()}✅ Context loaded from {path} (channels={len(_channel_histories)}, users={len(_user_profiles)})"
+        )
     except PermissionError as e:
-        logger.error(f"[Context] Permission denied loading context file {path}: {e}. Check that the bot process can read/write the data directory.")
+        logger.error(
+            f"[Context] Permission denied loading context file {path}: {e}. Check that the bot process can read/write the data directory."
+        )
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        logger.warning(f"[Context] Context file {path} is corrupted or invalid JSON: {e}. Starting with fresh in-memory context (old file left in place).")
+        logger.warning(
+            f"[Context] Context file {path} is corrupted or invalid JSON: {e}. Starting with fresh in-memory context (old file left in place)."
+        )
     except OSError as e:
         logger.warning(f"[Context] OS error loading context from {path}: {e}")
     except Exception as e:
@@ -205,7 +225,9 @@ def save_context() -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except PermissionError as e:
-        logger.error(f"[Context] Permission denied creating context directory {path.parent}: {e}")
+        logger.error(
+            f"[Context] Permission denied creating context directory {path.parent}: {e}"
+        )
         return False
     except Exception as e:
         logger.warning(f"[Context] Error ensuring directory for {path}: {e}")
@@ -221,7 +243,9 @@ def save_context() -> bool:
             profiles_serial[str(uid)] = {
                 "display_name": prof.get("display_name", ""),
                 "last_seen": prof.get("last_seen", 0.0),
-                "recent_messages": list(prof.get("recent_messages", []))[-MAX_USER_RECENT:],
+                "recent_messages": list(prof.get("recent_messages", []))[
+                    -MAX_USER_RECENT:
+                ],
             }
 
         # Persist compact channel summaries
@@ -251,11 +275,15 @@ def save_context() -> bool:
             "video_quotas": video_serial,
         }
 
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         logger.debug(f"Context saved to {path}")
         return True
     except PermissionError as e:
-        logger.error(f"[Context] Permission denied writing context file {path}: {e}. Data dir must be writable.")
+        logger.error(
+            f"[Context] Permission denied writing context file {path}: {e}. Data dir must be writable."
+        )
         return False
     except OSError as e:
         logger.warning(f"[Context] OS/IO error saving context to {path}: {e}")
@@ -285,31 +313,40 @@ def update_from_message(
     ts = timestamp or time.time()
     short_content = content[:280] if content else ""
 
-    _channel_histories[channel_id].append({
-        "ts": ts,
-        "author_id": user_id,
-        "author": author_name,
-        "content": short_content,
-        "is_bot": is_bot,
-        "image_urls": image_urls or [],
-        "links": links or [],
-    })
+    _channel_histories[channel_id].append(
+        {
+            "ts": ts,
+            "author_id": user_id,
+            "author": author_name,
+            "content": short_content,
+            "is_bot": is_bot,
+            "image_urls": image_urls or [],
+            "links": links or [],
+        }
+    )
 
     profile = _user_profiles[user_id]
     profile["display_name"] = author_name
     profile["last_seen"] = ts
 
-    profile["recent_messages"].append({
-        "ts": ts,
-        "channel_id": channel_id,
-        "content": short_content,
-    })
+    profile["recent_messages"].append(
+        {
+            "ts": ts,
+            "channel_id": channel_id,
+            "content": short_content,
+        }
+    )
 
     if PERSISTENCE_ENABLED and (len(_channel_histories[channel_id]) % 8 == 0):
         save_context()
 
 
-def get_channel_context(channel_id: int, max_lines: int = 8, for_meta_question: bool = False, exclude_current: bool = False) -> str:
+def get_channel_context(
+    channel_id: int,
+    max_lines: int = 8,
+    for_meta_question: bool = False,
+    exclude_current: bool = False,
+) -> str:
     """
     Raw recent channel messages (short excerpts only).
     Used by the get_channel_context custom tool (offered in non-minimal continuation fallback)
@@ -381,8 +418,6 @@ def get_messages_for_summarization(channel_id: int, keep_recent: int = 6) -> lis
 # (search subsystem removed)
 
 
-
-
 def _strip_accents(text: str) -> str:
     if not text:
         return ""
@@ -429,10 +464,26 @@ def _is_pure_image_gen_request_for_classification(text: str) -> bool:
     # Pure standalone text-to-video (T2V)
     try:
         if "video" in t:
-            gen_hints = ("genera", "crea", "haz", "generame", "creame", "hazme", "quiero", "necesito", "make a", "generate a")
+            gen_hints = (
+                "genera",
+                "crea",
+                "haz",
+                "generame",
+                "creame",
+                "hazme",
+                "quiero",
+                "necesito",
+                "make a",
+                "generate a",
+            )
             if any(g in t for g in gen_hints):
-                if ("esta " not in t and "la imagen" not in t and "la foto" not in t
-                        and "referencia" not in t and "analiza" not in t):
+                if (
+                    "esta " not in t
+                    and "la imagen" not in t
+                    and "la foto" not in t
+                    and "referencia" not in t
+                    and "analiza" not in t
+                ):
                     return True
     except Exception:
         pass
@@ -449,10 +500,40 @@ def _is_pure_casual_chat(t: str, word_count: int, is_reply_continuation: bool) -
     if is_reply_continuation:
         return False
     casual_hit = any(h in t for h in _CASUAL_CHAT_HINTS)
-    has_question_or_command = any(w in t for w in ("?", "busca", "dime", "explica", "analiza", "genera", "haz", "crea", "quiero",
-        "noticia", "noticias", "hoy", "ayer", "precio", "pasó", "ocurrió"))
-    has_personal_deep = any(w in t for w in ("mi ", "yo ", "me ", "mis ", "mio", "mía", "recuerda", "acord"))
-    return casual_hit and not has_question_or_command and not has_personal_deep and word_count <= 6
+    has_question_or_command = any(
+        w in t
+        for w in (
+            "?",
+            "busca",
+            "dime",
+            "explica",
+            "analiza",
+            "genera",
+            "haz",
+            "crea",
+            "quiero",
+            "noticia",
+            "noticias",
+            "hoy",
+            "ayer",
+            "precio",
+            "pasó",
+            "ocurrió",
+            "latest",
+            "reciente",
+            "controvers",
+            "qué pasó",
+        )
+    )
+    has_personal_deep = any(
+        w in t for w in ("mi ", "yo ", "me ", "mis ", "mio", "mía", "recuerda", "acord")
+    )
+    return (
+        casual_hit
+        and not has_question_or_command
+        and not has_personal_deep
+        and word_count <= 6
+    )
 
 
 def _has_fresh_or_tool_signal(t: str) -> bool:
@@ -460,13 +541,41 @@ def _has_fresh_or_tool_signal(t: str) -> bool:
 
     Preserves the exact (iteratively tightened) list that keeps queries with recency,
     prices, sports, or clear X signals at "normal" instead of demoting to minimal/casual.
+    Broadened via central _FRESH_OR_TOOL_HINTS (intents.py) for medium topical like controversies/latest.
     """
-    return any(k in t for k in (
-        "busca", "genera", "imagen", "video", "haz", "crea", "quiero que", "puedes",
-        "noticia", "noticias", "hoy", "ayer", "anoche", "reciente", "precio", "dolar",
-        "cotizacion", "partido", "paso", "pasó", "ocurrio", "breaking", "news", "en vivo",
-        "tweet", "tweets", "x.com", "trending", "este tweet", "el tweet", "post en x", "en tendencia",
-    ))
+    base = (
+        "busca",
+        "genera",
+        "haz",
+        "crea",
+        "quiero que",
+        "puedes",
+        "noticia",
+        "noticias",
+        "hoy",
+        "ayer",
+        "anoche",
+        "reciente",
+        "precio",
+        "dolar",
+        "cotizacion",
+        "partido",
+        "paso",
+        "pasó",
+        "ocurrio",
+        "breaking",
+        "news",
+        "en vivo",
+        "tweet",
+        "tweets",
+        "x.com",
+        "trending",
+        "este tweet",
+        "el tweet",
+        "post en x",
+        "en tendencia",
+    )
+    return any(k in t for k in base) or any(k in t for k in _FRESH_OR_TOOL_HINTS)
 
 
 def classify_query_context_need(text: str, is_reply_continuation: bool = False) -> str:
@@ -501,7 +610,9 @@ def classify_query_context_need(text: str, is_reply_continuation: bool = False) 
     # Dedicated "image_gen" ultra-light mode (even lighter than "minimal").
     # Pure first-turn text-to-image (and text-to-video) requests get almost zero context
     # and the appropriate minimal custom tool schema(s).
-    if not is_reply_continuation and _is_pure_image_gen_request_for_classification(text):
+    if not is_reply_continuation and _is_pure_image_gen_request_for_classification(
+        text
+    ):
         return "image_gen"
 
     # Strong personal or continuation signals -> rich
@@ -512,15 +623,34 @@ def classify_query_context_need(text: str, is_reply_continuation: bool = False) 
     # Very short + direct question word or lookup verb -> minimal
     if word_count <= 7:
         for hint in _SIMPLE_FACTUAL_HINTS:
-            if hint in t:
+            if hint in t and not _has_fresh_or_tool_signal(t):
                 return "minimal"
         # Pure short questions without personal pronouns often minimal
-        if any(w in t for w in ("?", "es", "son", "cuál", "cual", "qué", "que", "quién")) and "mi " not in t and "yo " not in t:
-            if word_count <= 5:
+        if (
+            any(
+                w in t
+                for w in ("?", "es", "son", "cuál", "cual", "qué", "que", "quién")
+            )
+            and "mi " not in t
+            and "yo " not in t
+        ):
+            if word_count <= 5 and not _has_fresh_or_tool_signal(t):
+                # guard with fresh signal (adjusted) so recency/controversy phrasing like "latest ..." don't falsely demote due to substring matches (e.g. "es" in "latest")
                 return "minimal"
 
     # Long queries or containing "explica", "analiza", "compara" etc. lean rich
-    if word_count > 18 or any(k in t for k in ("explica", "analiza", "compara", "detall", "paso a paso", "cómo puedo", "como puedo")):
+    if word_count > 18 or any(
+        k in t
+        for k in (
+            "explica",
+            "analiza",
+            "compara",
+            "detall",
+            "paso a paso",
+            "cómo puedo",
+            "como puedo",
+        )
+    ):
         return "rich"
 
     result = "normal"
@@ -539,13 +669,11 @@ def classify_query_context_need(text: str, is_reply_continuation: bool = False) 
     # unnecessary native tool schemas (~250+ tokens) on turns that don't need search.
     if not is_reply_continuation and result == "normal":
         has_personal = any(w in t for w in ("mi ", "yo ", "me ", "mis ", "mio", "mía"))
-        if word_count <= 7 and not has_personal and not _has_fresh_or_tool_signal(t):
-            # wc<=7 (was <=5) to push a few more timeless factual into minimal (token saving)
+        if word_count <= 5 and not has_personal and not _has_fresh_or_tool_signal(t):
+            # wc<=5 (tightened from <=7) to preserve info-seeking phrasing (e.g. recency/controversy queries) at normal tier for search offering
             result = "minimal"
 
     return result
-
-
 
 
 logger.info("✅ Context module loaded (buffers + per-user recent messages)")
@@ -555,7 +683,9 @@ logger.info("✅ Context module loaded (buffers + per-user recent messages)")
 # =============================================================================
 # Public helper for the new Recent Conversation Context feature
 # =============================================================================
-def get_recent_channel_messages(channel_id: int, limit: int = 20) -> list[dict[str, Any]]:
+def get_recent_channel_messages(
+    channel_id: int, limit: int = 20
+) -> list[dict[str, Any]]:
     """Returns the most recent messages for a channel.
 
     Used by the lightweight recent conversation context summarizer
