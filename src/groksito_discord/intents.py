@@ -54,12 +54,27 @@ from __future__ import annotations
 
 STRONG_DIRECTED_KEYWORDS = [
     # Targeted questions about the referenced content (from old x_link set)
-    "este tweet", "este post", "este link", "este enlace", "esta url",
-    "de qué habla", "qué dice", "qué es este", "de qué va este",
-    "este x.com", "este twitter", "el tweet que", "el post que",
-    "qué opina", "analiza este", "resumen de este", "de qué trata este",
+    "este tweet",
+    "este post",
+    "este link",
+    "este enlace",
+    "esta url",
+    "de qué habla",
+    "qué dice",
+    "qué es este",
+    "de qué va este",
+    "este x.com",
+    "este twitter",
+    "el tweet que",
+    "el post que",
+    "qué opina",
+    "analiza este",
+    "resumen de este",
+    "de qué trata este",
     # Explicit addressing of the bot (common even without proper @mention)
-    "groksito", "grok", "@groksito",
+    "groksito",
+    "grok",
+    "@groksito",
 ]
 
 # GENERAL_REPLY_INQUIRY_KEYWORDS: Broad set used *only* for context enrichment
@@ -68,11 +83,33 @@ STRONG_DIRECTED_KEYWORDS = [
 # These are intentionally permissive and common in casual Spanish; they should
 # never be sufficient by themselves to wake the bot on a reply to a friend.
 GENERAL_REPLY_INQUIRY_KEYWORDS = [
-    "esto", "este mensaje", "el mensaje", "lo que", "arriba", "el anterior",
-    "la foto", "la imagen", "el post", "el tweet", "el link",
-    "qué es", "de qué", "qué dice", "qué opinas", "qué piensas", "qué te parece",
-    "explica", "analiza", "resumen", "sobre esto", "de esto", "esto de",
-    "la que", "el que", "lo anterior", "el contenido",
+    "esto",
+    "este mensaje",
+    "el mensaje",
+    "lo que",
+    "arriba",
+    "el anterior",
+    "la foto",
+    "la imagen",
+    "el post",
+    "el tweet",
+    "el link",
+    "qué es",
+    "de qué",
+    "qué dice",
+    "qué opinas",
+    "qué piensas",
+    "qué te parece",
+    "explica",
+    "analiza",
+    "resumen",
+    "sobre esto",
+    "de esto",
+    "esto de",
+    "la que",
+    "el que",
+    "lo anterior",
+    "el contenido",
 ]
 
 
@@ -110,11 +147,26 @@ def _has_recent_referent_intent(text: str) -> bool:
         return False
     t = text.lower()
     base = any(kw in t for kw in GENERAL_REPLY_INQUIRY_KEYWORDS)
-    referent = any(kw in t for kw in (
-        "el usuario", "ese usuario", "el que", "la que", "ese post", "ese mensaje",
-        "the user", "that user", "the guy", "the person", "the one who posted",
-        "what the user", "the image of the user", "la imagen del", "foto del usuario",
-    ))
+    referent = any(
+        kw in t
+        for kw in (
+            "el usuario",
+            "ese usuario",
+            "el que",
+            "la que",
+            "ese post",
+            "ese mensaje",
+            "the user",
+            "that user",
+            "the guy",
+            "the person",
+            "the one who posted",
+            "what the user",
+            "the image of the user",
+            "la imagen del",
+            "foto del usuario",
+        )
+    )
     return base or referent
 
 
@@ -134,30 +186,164 @@ def _has_recent_referent_intent(text: str) -> bool:
 # =============================================================================
 
 _SIMPLE_FACTUAL_HINTS = [
-    "qué es", "que es", "quién es", "quien es", "qué significa", "que significa",
-    "cómo se", "como se", "cuál es", "cual es", "cuánto", "cuanto", "cuándo", "cuando",
-    "dónde", "donde", "por qué", "porque", "dime", "decime", "qué hora", "que hora",
-    "clima", "tiempo", "temperatura", "busca", "buscá", "search", "google",
-    "precio de", "cuesta", "definición", "definicion", "significado",
-    "a qué hora", "a que hora", "en qué año", "en que año",
+    "qué es",
+    "que es",
+    "quién es",
+    "quien es",
+    "qué significa",
+    "que significa",
+    "cómo se",
+    "como se",
+    "cuál es",
+    "cual es",
+    "cuánto",
+    "cuanto",
+    "cuándo",
+    "cuando",
+    "dónde",
+    "donde",
+    "por qué",
+    "porque",
+    "dime",
+    "decime",
+    "qué hora",
+    "que hora",
+    "clima",
+    "tiempo",
+    "temperatura",
+    "busca",
+    "buscá",
+    "search",
+    "google",
+    "precio de",
+    "cuesta",
+    "definición",
+    "definicion",
+    "significado",
+    "a qué hora",
+    "a que hora",
+    "en qué año",
+    "en que año",
     # Casual/low-context greetings and short chat (to default to minimal for native feel)
-    "wena", "hola", "holas", "q tal", "que tal", "como estas", "como estai", "bro", "weon", "wn",
-    "buena", "buenas", "saludos", "hey", "oe", "alo", "aló",
+    "wena",
+    "hola",
+    "holas",
+    "q tal",
+    "que tal",
+    "como estas",
+    "como estai",
+    "bro",
+    "weon",
+    "wn",
+    "buena",
+    "buenas",
+    "saludos",
+    "hey",
+    "oe",
+    "alo",
+    "aló",
 ]
 
 _CASUAL_CHAT_HINTS = [
     # Pure casual chat, greetings, laughter, acknowledgments that almost never need tools or deep context
-    "wena", "hola", "holas", "q tal", "que tal", "como estas", "como estai", "bro", "weon", "wn", "oe",
-    "buena", "buenas", "saludos", "hey", "alo", "aló", "gracias", "thx", "ok", "dale", "y tu", "todo bien",
-    "jajaja", "jaja", "jeje", "jajajaja", "xd", "lol", "jajaj", "jaj", "ja ja",
-    "jajajajaja", "ja", "ajaj", "jejeje", "haha", "hehe",
+    "wena",
+    "hola",
+    "holas",
+    "q tal",
+    "que tal",
+    "como estas",
+    "como estai",
+    "bro",
+    "weon",
+    "wn",
+    "oe",
+    "buena",
+    "buenas",
+    "saludos",
+    "hey",
+    "alo",
+    "aló",
+    "gracias",
+    "thx",
+    "ok",
+    "dale",
+    "y tu",
+    "todo bien",
+    "jajaja",
+    "jaja",
+    "jeje",
+    "jajajaja",
+    "xd",
+    "lol",
+    "jajaj",
+    "jaj",
+    "ja ja",
+    "jajajajaja",
+    "ja",
+    "ajaj",
+    "jejeje",
+    "haha",
+    "hehe",
 ]
 
 _COMPLEX_OR_PERSONAL_HINTS = [
-    "recuerda", "recuerdas", "te acordás", "acordas", "hablamos de", "sobre mi",
-    "mi", "yo", "personal", "siento", "creo que", "quiero que", "puedes ayudarme con",
-    "continua", "continúa", "sigue", "más detalle", "explica mejor", "contexto",
-    "anteriormente", "antes", "la otra vez", "como te dije", "según lo que",
+    "recuerda",
+    "recuerdas",
+    "te acordás",
+    "acordas",
+    "hablamos de",
+    "sobre mi",
+    "mi",
+    "yo",
+    "personal",
+    "siento",
+    "creo que",
+    "quiero que",
+    "puedes ayudarme con",
+    "continua",
+    "continúa",
+    "sigue",
+    "más detalle",
+    "explica mejor",
+    "contexto",
+    "anteriormente",
+    "antes",
+    "la otra vez",
+    "como te dije",
+    "según lo que",
+]
+
+# Fresh/news/controversy/recency signals (centralized, Phase 5 style).
+# Broadened for normal/medium topical queries (e.g. "latest controversies about X",
+# "qué pasó con", "recent issues/drama") so they classify as "normal" (search offered)
+# instead of demoting to minimal on wc<=7. Feeds classify + _has_fresh_or_tool_signal.
+_FRESH_OR_TOOL_HINTS = [
+    "latest",
+    "reciente",
+    "recientes",
+    "controvers",
+    "polémica",
+    "polemica",
+    "problemas",
+    "issues",
+    "bans",
+    "anti-cheat",
+    "anticheat",
+    "qué pasó con",
+    "que paso con",
+    "what happened",
+    "drama",
+    "scandal",
+    "recent",
+    "novedades",
+    "actualidad",
+    "últimas",
+    "ultimas",
+    "pasa con",
+    "pasó con",
+    "paso con",
+    "qué hay de nuevo",
+    "que hay de nuevo",
 ]
 
 
@@ -176,6 +362,7 @@ _COMPLEX_OR_PERSONAL_HINTS = [
 #   - Aggressively excludes anything that smells like edit, analysis, or reference.
 # =============================================================================
 
+
 def is_conversation_meta_question(text: str) -> bool:
     if not text or len(text.strip()) < 4:
         return False
@@ -183,23 +370,46 @@ def is_conversation_meta_question(text: str) -> bool:
     t = _strip_accents(text.lower())
 
     strong_triggers = [
-        "de que estan hablando", "de que se esta hablando", "de que se está hablando",
-        "que estan hablando", "qué están hablando",
-        "de que va esto", "de qué va esto", "de que va la conversacion",
-        "de que se trata", "de qué se trata",
-        "cual es el tema", "cuál es el tema", "cual es el tema de",
-        "que paso", "qué pasó", "que pasa", "qué pasa",
-        "resumen de la conversacion", "resumen de la charla",
-        "de que hablaro", "de qué hablaron",
-        "de que estaban hablando", "de qué estaban hablando",
+        "de que estan hablando",
+        "de que se esta hablando",
+        "de que se está hablando",
+        "que estan hablando",
+        "qué están hablando",
+        "de que va esto",
+        "de qué va esto",
+        "de que va la conversacion",
+        "de que se trata",
+        "de qué se trata",
+        "cual es el tema",
+        "cuál es el tema",
+        "cual es el tema de",
+        "que paso",
+        "qué pasó",
+        "que pasa",
+        "qué pasa",
+        "resumen de la conversacion",
+        "resumen de la charla",
+        "de que hablaro",
+        "de qué hablaron",
+        "de que estaban hablando",
+        "de qué estaban hablando",
         "de que estaban discutiendo",
-        "contexto de la conversacion", "contexto de la charla",
-        "tema de la conversacion", "tema de la charla",
-        "sobre de que", "sobre qué",
-        "what are you talking about", "what are they talking about",
-        "whats the topic", "what is the topic", "what's the topic",
-        "what happened", "whats going on", "what's going on",
-        "summary of the conversation", "conversation summary",
+        "contexto de la conversacion",
+        "contexto de la charla",
+        "tema de la conversacion",
+        "tema de la charla",
+        "sobre de que",
+        "sobre qué",
+        "what are you talking about",
+        "what are they talking about",
+        "whats the topic",
+        "what is the topic",
+        "what's the topic",
+        "what happened",
+        "whats going on",
+        "what's going on",
+        "summary of the conversation",
+        "conversation summary",
     ]
 
     for trig in strong_triggers:
@@ -207,9 +417,12 @@ def is_conversation_meta_question(text: str) -> bool:
             return True
 
     flexible_patterns = [
-        "de que va", "de qué va",
-        "que se esta hablando", "qué se está hablando",
-        "el tema de", "cual es el",
+        "de que va",
+        "de qué va",
+        "que se esta hablando",
+        "qué se está hablando",
+        "el tema de",
+        "cual es el",
     ]
     for pat in flexible_patterns:
         if pat in t:
@@ -235,20 +448,59 @@ def is_pure_image_generation_request(text: str) -> bool:
 
     # Broad set of generation verbs (direct commands to create)
     gen_verbs = (
-        "genera", "crea", "haz", "dibuja", "pinta", "ilustra", "imagina",
-        "generame", "creame", "hazme", "dibujame", "pintame", "ilustrame",
-        "generate", "create", "draw", "make", "paint", "render", "produce",
-        "quiero una imagen", "necesito una imagen", "una imagen de",
-        "quiero que generes", "hazme una", "creame una",
+        "genera",
+        "crea",
+        "haz",
+        "dibuja",
+        "pinta",
+        "ilustra",
+        "imagina",
+        "generame",
+        "creame",
+        "hazme",
+        "dibujame",
+        "pintame",
+        "ilustrame",
+        "generate",
+        "create",
+        "draw",
+        "make",
+        "paint",
+        "render",
+        "produce",
+        "quiero una imagen",
+        "necesito una imagen",
+        "una imagen de",
+        "quiero que generes",
+        "hazme una",
+        "creame una",
     )
 
     # Image target nouns / phrases
     img_nouns = (
-        "imagen", "image", "foto", "photo", "dibujo", "ilustracion", "ilustración",
-        "picture", "pic", "drawing", "ilustración de", "render de", "arte de",
-        "retrato de", "paisaje de", "escena de",
+        "imagen",
+        "image",
+        "foto",
+        "photo",
+        "dibujo",
+        "ilustracion",
+        "ilustración",
+        "picture",
+        "pic",
+        "drawing",
+        "ilustración de",
+        "render de",
+        "arte de",
+        "retrato de",
+        "paisaje de",
+        "escena de",
         # Common fast-typo variants for "imagen"
-        "iamgen", "imajen", "imagne", "inagen", "imagenn", "iamagen",
+        "iamgen",
+        "imajen",
+        "imagne",
+        "inagen",
+        "imagenn",
+        "iamagen",
     )
 
     has_gen = any(v in t for v in gen_verbs)
@@ -258,25 +510,77 @@ def is_pure_image_generation_request(text: str) -> bool:
 
     # Very strong exclusion list for anything involving existing visual references or analysis
     ref_or_edit_signals = (
-        "esta imagen", "esta foto", "la imagen", "la foto", "esa imagen", "esa foto",
-        "las imágenes", "las fotos", "la que", "las que",
-        "con esta", "basado en", "usando esta", "de esta", "sobre esta", "referencia",
-        "edita", "editá", "transforma", "convierte esta", "redibuja", "modifica",
-        "meme con", "estilo con esta", "haz un estilo", "en estilo de esta",
-        "que ves", "qué ves", "describe", "analiza esta", "analiza la", "explica esta",
-        "cuéntame de esta", "qué hay en", "qué ves en", "dime qué hay",
-        "adjunta", "subida", "en el mensaje", "en el reply",
+        "esta imagen",
+        "esta foto",
+        "la imagen",
+        "la foto",
+        "esa imagen",
+        "esa foto",
+        "las imágenes",
+        "las fotos",
+        "la que",
+        "las que",
+        "con esta",
+        "basado en",
+        "usando esta",
+        "de esta",
+        "sobre esta",
+        "referencia",
+        "edita",
+        "editá",
+        "transforma",
+        "convierte esta",
+        "redibuja",
+        "modifica",
+        "meme con",
+        "estilo con esta",
+        "haz un estilo",
+        "en estilo de esta",
+        "que ves",
+        "qué ves",
+        "describe",
+        "analiza esta",
+        "analiza la",
+        "explica esta",
+        "cuéntame de esta",
+        "qué hay en",
+        "qué ves en",
+        "dime qué hay",
+        "adjunta",
+        "subida",
+        "en el mensaje",
+        "en el reply",
     )
     if any(sig in t for sig in ref_or_edit_signals):
         return False
 
     # Pure search (not generation)
-    search_only = ("busca imagen", "busca imágenes", "busca fotos", "imágenes de", "fotos de", "pictures of", "muéstrame imágenes", "busca una imagen")
-    if any(s in t for s in search_only) and not any(v in t for v in ("genera", "crea", "haz una", "dibuja", "quiero una imagen de")):
+    search_only = (
+        "busca imagen",
+        "busca imágenes",
+        "busca fotos",
+        "imágenes de",
+        "fotos de",
+        "pictures of",
+        "muéstrame imágenes",
+        "busca una imagen",
+    )
+    if any(s in t for s in search_only) and not any(
+        v in t for v in ("genera", "crea", "haz una", "dibuja", "quiero una imagen de")
+    ):
         return False
 
     # Capability questions or meta about the feature itself (not a direct generation command)
-    if any(x in t for x in ("puedes generar imagen", "puedes crear imagen", "como genero imagen", "cómo genero una imagen", "funciona la imagen")):
+    if any(
+        x in t
+        for x in (
+            "puedes generar imagen",
+            "puedes crear imagen",
+            "como genero imagen",
+            "cómo genero una imagen",
+            "funciona la imagen",
+        )
+    ):
         return False
 
     # Very short + no real subject after the verb → probably not a serious gen request
@@ -305,6 +609,7 @@ def is_pure_image_generation_request(text: str) -> bool:
 #   - Must remain narrow to avoid polluting normal chat with expensive media tools.
 # =============================================================================
 
+
 def _detect_visual_intent(text: str) -> bool:
     """Lightweight visual/media intent detector (broader: used for vision context, image understanding in search, analysis, etc).
     NOT used to decide offering of generate/edit tools (see _detect_image_creation_intent for that).
@@ -313,10 +618,30 @@ def _detect_visual_intent(text: str) -> bool:
         return False
     t = text.lower()
     visual_keywords = [
-        "imagen", "image", "foto", "photo", "dibuja", "draw", "genera", "crea", "haz",
-        "video", "anima", "animación", "meme", "estilo", "transforma", "edita",
-        "cyberpunk", "blanco y negro", "grok-imagine",
-        "imágenes de", "fotos de", "pictures of", "muéstrame imágenes", "show images",
+        "imagen",
+        "image",
+        "foto",
+        "photo",
+        "dibuja",
+        "draw",
+        "genera",
+        "crea",
+        "haz",
+        "video",
+        "anima",
+        "animación",
+        "meme",
+        "estilo",
+        "transforma",
+        "edita",
+        "cyberpunk",
+        "blanco y negro",
+        "grok-imagine",
+        "imágenes de",
+        "fotos de",
+        "pictures of",
+        "muéstrame imágenes",
+        "show images",
     ]
     return any(kw in t for kw in visual_keywords)
 
@@ -344,45 +669,134 @@ def _detect_image_creation_intent(text: str) -> bool:
     # Strong explicit creation / edit / video-from-image phrases (Spanish + English)
     creation_phrases = [
         # Pure generation (first-turn or follow-up) - images
-        "genera una imagen", "genera imagen", "generame una imagen", "generame imagen", "generá una imagen",
-        "crea una imagen", "crea imagen", "creame una imagen", "creá una imagen",
-        "haz una imagen", "hazme una imagen", "haz imagen", "hazme imagen",
-        "dibuja una", "dibujame", "dibuja imagen", "pinta una", "ilustra una",
-        "quiero una imagen", "necesito una imagen", "una imagen de", "quiero que generes una",
-        "make an image", "generate an image", "create an image", "draw a", "i want an image of",
-
+        "genera una imagen",
+        "genera imagen",
+        "generame una imagen",
+        "generame imagen",
+        "generá una imagen",
+        "crea una imagen",
+        "crea imagen",
+        "creame una imagen",
+        "creá una imagen",
+        "haz una imagen",
+        "hazme una imagen",
+        "haz imagen",
+        "hazme imagen",
+        "dibuja una",
+        "dibujame",
+        "dibuja imagen",
+        "pinta una",
+        "ilustra una",
+        "quiero una imagen",
+        "necesito una imagen",
+        "una imagen de",
+        "quiero que generes una",
+        "make an image",
+        "generate an image",
+        "create an image",
+        "draw a",
+        "i want an image of",
         # Pure text-to-video (T2V) standalone requests — must set creation intent so generate_video tool is offered
-        "genera un video", "genera video", "generame un video", "generame video", "generá un video",
-        "crea un video", "crea video", "creame un video", "creá un video",
-        "haz un video", "hazme un video", "haz video", "hazme video",
-        "dibuja un video", "anima", "crea una animacion", "crea una animación",
-        "quiero un video", "necesito un video", "un video de", "un video con",
-        "make a video", "generate a video", "create a video", "i want a video of",
-
+        "genera un video",
+        "genera video",
+        "generame un video",
+        "generame video",
+        "generá un video",
+        "crea un video",
+        "crea video",
+        "creame un video",
+        "creá un video",
+        "haz un video",
+        "hazme un video",
+        "haz video",
+        "hazme video",
+        "dibuja un video",
+        "anima",
+        "crea una animacion",
+        "crea una animación",
+        "quiero un video",
+        "necesito un video",
+        "un video de",
+        "un video con",
+        "make a video",
+        "generate a video",
+        "create a video",
+        "i want a video of",
         # Edit / transform / style on reference (critical for reply-to-image + edit cases)
-        "edita esta", "edita la", "editá esta", "editá la", "edita la imagen", "edita esta foto",
-        "transforma esta", "transforma la", "convierte esta", "convierte la",
-        "pasa esta a", "pasa la a", "cambia esta a", "cambia la a", "redibuja esta", "redibuja la",
-        "meme con esta", "meme con la", "haz un meme con esta", "haz un meme con la",
-        "genera un estilo con esta", "haz un estilo con esta", "en estilo de esta", "estilo cyberpunk con",
-        "make this", "edit this", "turn this into", "style this as",
-
+        "edita esta",
+        "edita la",
+        "editá esta",
+        "editá la",
+        "edita la imagen",
+        "edita esta foto",
+        "transforma esta",
+        "transforma la",
+        "convierte esta",
+        "convierte la",
+        "pasa esta a",
+        "pasa la a",
+        "cambia esta a",
+        "cambia la a",
+        "redibuja esta",
+        "redibuja la",
+        "meme con esta",
+        "meme con la",
+        "haz un meme con esta",
+        "haz un meme con la",
+        "genera un estilo con esta",
+        "haz un estilo con esta",
+        "en estilo de esta",
+        "estilo cyberpunk con",
+        "make this",
+        "edit this",
+        "turn this into",
+        "style this as",
         # Video from image reference (I2V, explicit only)
-        "video de esta", "video de la", "haz un video de esta", "haz un video de la",
-        "genera un video de esta", "genera un video de la", "crea un video de esta",
-        "anima esta", "anima la", "convierte esta en video", "convierte la en video",
-        "video con esta foto", "haz video de la que", "animate this", "make a video of this",
-
+        "video de esta",
+        "video de la",
+        "haz un video de esta",
+        "haz un video de la",
+        "genera un video de esta",
+        "genera un video de la",
+        "crea un video de esta",
+        "anima esta",
+        "anima la",
+        "convierte esta en video",
+        "convierte la en video",
+        "video con esta foto",
+        "haz video de la que",
+        "animate this",
+        "make a video of this",
         # Follow-up creation from a previous bot-generated image (in reply context)
-        "basado en esta", "usando esta", "con esta imagen", "con esta foto",
-        "otra version de la", "variante de la", "haz otra", "genera otra", "la que generaste",
-        "la imagen anterior", "la foto anterior", "la generada", "la del bot",
+        "basado en esta",
+        "usando esta",
+        "con esta imagen",
+        "con esta foto",
+        "otra version de la",
+        "variante de la",
+        "haz otra",
+        "genera otra",
+        "la que generaste",
+        "la imagen anterior",
+        "la foto anterior",
+        "la generada",
+        "la del bot",
     ]
 
     analysis_signals = (
-        "qué ves", "que ves", "analiza", "describe", "cuéntame de", "qué hay en",
-        "qué ves en", "dime qué hay", "explica esta", "qué es esta", "que es esta",
-        "resumen de esta", "de qué trata esta",
+        "qué ves",
+        "que ves",
+        "analiza",
+        "describe",
+        "cuéntame de",
+        "qué hay en",
+        "qué ves en",
+        "dime qué hay",
+        "explica esta",
+        "qué es esta",
+        "que es esta",
+        "resumen de esta",
+        "de qué trata esta",
     )
     is_pure_analysis = any(a in t for a in analysis_signals)
 
@@ -392,18 +806,63 @@ def _detect_image_creation_intent(text: str) -> bool:
                 return True
             # If analysis verb present, still allow if there's explicit creation action too (e.g. "edita la que generaste")
             # Use longer phrases to avoid substring false positives like 'genera' in 'generaste'
-            if any(cv in t for cv in ("edita", "editá", "transforma", "convierte", "hazme", "haz una", "haz otra", "genera una", "genera otra", "crea una", "crea otra", "otra version", "variante de", "haz un estilo")):
+            if any(
+                cv in t
+                for cv in (
+                    "edita",
+                    "editá",
+                    "transforma",
+                    "convierte",
+                    "hazme",
+                    "haz una",
+                    "haz otra",
+                    "genera una",
+                    "genera otra",
+                    "crea una",
+                    "crea otra",
+                    "otra version",
+                    "variante de",
+                    "haz un estilo",
+                )
+            ):
                 return True
 
     # Fallback: strong gen verb + clear creation noun (image or video), but NOT pure analysis
-    strong_gen_verbs = ("genera", "crea", "haz", "dibuja", "quiero una imagen de", "quiero un video")
+    strong_gen_verbs = (
+        "genera",
+        "crea",
+        "haz",
+        "dibuja",
+        "quiero una imagen de",
+        "quiero un video",
+    )
     creation_nouns = (
-        "imagen", "image", "foto", "photo", "dibujo", "ilustracion", "ilustración",
-        "picture", "drawing", "arte de", "retrato", "escena",
+        "imagen",
+        "image",
+        "foto",
+        "photo",
+        "dibujo",
+        "ilustracion",
+        "ilustración",
+        "picture",
+        "drawing",
+        "arte de",
+        "retrato",
+        "escena",
         # Common typos for "imagen" (users type fast)
-        "iamgen", "imajen", "imagne", "inagen", "imagenn", "iamagen",
+        "iamgen",
+        "imajen",
+        "imagne",
+        "inagen",
+        "imagenn",
+        "iamagen",
         # Video / animation nouns for pure T2V fallback
-        "video", "videos", "animacion", "animación", "animacion de", "video de",
+        "video",
+        "videos",
+        "animacion",
+        "animación",
+        "animacion de",
+        "video de",
     )
     has_verb = any(v in t for v in strong_gen_verbs)
     has_noun = any(n in t for n in creation_nouns)
@@ -421,5 +880,6 @@ def _strip_accents(text: str) -> str:
     if not text:
         return ""
     import unicodedata
+
     nfkd = unicodedata.normalize("NFKD", text)
     return "".join(c for c in nfkd if not unicodedata.combining(c))

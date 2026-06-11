@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from ..config import settings
 from ..correlation import cid_prefix
 
 logger = logging.getLogger("groksito.skills.decision")
@@ -61,9 +60,9 @@ Output ONE compact JSON object only (no text, no ```):
 
 Rules (follow strictly, be conservative):
 - "direct" (DEFAULT & PREFERRED): timeless knowledge, definitions, "qué es X", "cómo funciona", math, code, history, general explanations, opinions, roleplay, concepts. Grok should answer from training data. Examples that must be direct: "qué es la fotosíntesis", "capital de Francia", "cómo se dice hello en español", "explica recursión".
-- "search": ONLY when the user needs information that is time-sensitive, live, or has changed since training cutoff. Must have explicit recency: "hoy", "ahora", "actual", "en vivo", "breaking", "última hora", "precio del dólar hoy", "resultado del partido en vivo", "clima en Buenos Aires ahora", "qué pasó con las noticias". 
+- "search": ONLY when the user needs information that is time-sensitive, live, or has changed since training cutoff. Must have explicit recency or fresh angle: "hoy", "ahora", "actual", "en vivo", "breaking", "última hora", "precio del dólar hoy", "latest controversies", "recent issues", "qué pasó con", "what happened", "drama", "scandal", "problemas con", "issues with". 
   - "Qué es el dólar blue" or "explica bitcoin" = direct.
-  - "Dólar blue hoy" / "cuánto está el bitcoin ahora" / "pico de jugadores poe2" = search.
+  - "Dólar blue hoy" / "cuánto está el bitcoin ahora" / "pico de jugadores poe2" / "latest controversies about Task Bar Hero" = search.
 - "recent_context": the user addressed the bot (mentioned or reply_to_bot) or is asking about the prior conversation ("de qué hablaban antes", "continúa", "resumen de la charla"). Usually also set needs_recent_context=true.
 - "use_skill": only when the exact query matches one of the approved_skills in the signals list.
 - needs_recent_context: true on any mention/reply to bot, or any explicit reference to "antes", "la conversación anterior", "qué dijimos".
@@ -78,6 +77,7 @@ Signals (compact JSON):
 # Structured Decision Result
 # =============================================================================
 
+
 class DecisionAction(str, Enum):
     DIRECT = "direct"
     SEARCH = "search"
@@ -89,8 +89,8 @@ class DecisionAction(str, Enum):
 class Decision:
     action: DecisionAction = DecisionAction.DIRECT
     needs_recent_context: bool = False
-    needs_search: str = "none"          # "web" | "x" | "both" | "none"
-    use_skill: str | None = None        # skill_id if action == USE_SKILL
+    needs_search: str = "none"  # "web" | "x" | "both" | "none"
+    use_skill: str | None = None  # skill_id if action == USE_SKILL
     propose_skill: dict[str, str] | None = None  # {"name": "...", "reason": "..."}
     rationale: str = ""
 
@@ -109,6 +109,7 @@ class Decision:
 # Decision Engine
 # =============================================================================
 
+
 async def make_decision(
     *,
     user_message: str,
@@ -117,7 +118,7 @@ async def make_decision(
     is_reply_to_bot: bool = False,
     recent_signals: str | None = None,
     approved_skill_names: list[str] | None = None,
-    context_need: str = "normal",   # from classify (casual/minimal/normal/rich) — helps heuristics
+    context_need: str = "normal",  # from classify (casual/minimal/normal/rich) — helps heuristics
 ) -> Decision:
     """
     Lightweight decision step (tiny cache-friendly call).
@@ -150,24 +151,73 @@ async def make_decision(
     # This is safe because the improved heuristic below is now quite accurate.
     # ------------------------------------------------------------------
     tlow = (user_message or "").lower()
-    has_strong_timeless = any(k in tlow for k in (
-        "qué es", "que es", "quién es", "quien es", "qué significa", "como se define",
-        "capital de", "fórmula", "matemática", "explica el concepto", "definición de",
-        "cómo funciona un", "por qué existe",
-    ))
-    has_strong_fresh = any(k in tlow for k in (
-        "hoy", "ahora", "actual", "en este momento", "en vivo", "live", "breaking",
-        "última hora", "dólar blue", "precio.*hoy", "cotización", "clima.*hoy",
-        "steam chart", "steam charts", "player count", "player counts", "concurrent player",
-        "jugadores steam", "pico de jugadores", "cuántos jugadores", "cuantos jugadores",
-        "steam player", "charts player",
-    ))
+    has_strong_timeless = any(
+        k in tlow
+        for k in (
+            "qué es",
+            "que es",
+            "quién es",
+            "quien es",
+            "qué significa",
+            "como se define",
+            "capital de",
+            "fórmula",
+            "matemática",
+            "explica el concepto",
+            "definición de",
+            "cómo funciona un",
+            "por qué existe",
+        )
+    )
+    has_strong_fresh = any(
+        k in tlow
+        for k in (
+            "hoy",
+            "ahora",
+            "actual",
+            "en este momento",
+            "en vivo",
+            "live",
+            "breaking",
+            "última hora",
+            "dólar blue",
+            "precio hoy",
+            "cotización",
+            "clima hoy",
+            "steam chart",
+            "steam charts",
+            "player count",
+            "player counts",
+            "concurrent player",
+            "jugadores steam",
+            "pico de jugadores",
+            "cuántos jugadores",
+            "cuantos jugadores",
+            "steam player",
+            "charts player",
+            "latest",
+            "reciente",
+            "controvers",
+            "polémica",
+            "problemas",
+            "issues",
+            "drama",
+            "scandal",
+            "qué pasó",
+            "what happened",
+            "recent",
+        )
+    )
     has_x_signal = any(k in tlow for k in ("x.com", "tweet", "en tendencia", "twitter"))
 
-    if (has_strong_timeless and not has_strong_fresh and not has_x_signal
-            and not (is_mentioned or is_reply_to_bot)
-            and context_need not in ("rich",)
-            and not (approved_skill_names or [])):
+    if (
+        has_strong_timeless
+        and not has_strong_fresh
+        and not has_x_signal
+        and not (is_mentioned or is_reply_to_bot)
+        and context_need not in ("rich",)
+        and not (approved_skill_names or [])
+    ):
         # Very confident direct + no need for model nuance -> skip LLM decision call
         return _heuristic_decision(
             user_message=user_message,
@@ -237,7 +287,9 @@ def _parse_decision_json(text: str) -> Decision | None:
         needs_recent_context=bool(obj.get("needs_recent_context", False)),
         needs_search=str(obj.get("needs_search", "none")).lower(),
         use_skill=obj.get("use_skill"),
-        propose_skill=obj.get("propose_skill") if isinstance(obj.get("propose_skill"), dict) else None,
+        propose_skill=obj.get("propose_skill")
+        if isinstance(obj.get("propose_skill"), dict)
+        else None,
         rationale=str(obj.get("rationale", ""))[:200],
     )
 
@@ -271,31 +323,95 @@ def _heuristic_decision(
         )
 
     # --- Recent / address signals (very important for coherence) ---
-    recent_kw = ("antes", "dijimos", "hablábamos", "qué pasó", "continúa", "de qué", "resumen de la", "la charla", "tema anterior")
+    recent_kw = (
+        "antes",
+        "dijimos",
+        "hablábamos",
+        "qué pasó",
+        "continúa",
+        "de qué",
+        "resumen de la",
+        "la charla",
+        "tema anterior",
+    )
     is_addressed = is_mentioned or is_reply_to_bot
     needs_recent = is_addressed or any(k in t for k in recent_kw)
 
     # --- Timeless / definitional patterns (force direct) ---
     timeless_starters = (
-        "qué es", "que es", "quién es", "quien es", "qué significa", "como se define",
-        "capital de", "fórmula de", "explica qué es", "definición", "cómo funciona un",
-        "por qué existe", "qué es la", "concepto de",
+        "qué es",
+        "que es",
+        "quién es",
+        "quien es",
+        "qué significa",
+        "como se define",
+        "capital de",
+        "fórmula de",
+        "explica qué es",
+        "definición",
+        "cómo funciona un",
+        "por qué existe",
+        "qué es la",
+        "concepto de",
     )
     has_timeless = any(k in t for k in timeless_starters)
 
     # --- Strong fresh / live / current-value signals (the only things that justify search) ---
     strong_fresh = (
-        "hoy", "ahora", "actual", "en este momento", "en vivo", "live",
-        "breaking", "última hora", "dólar blue", "cotización", "clima.*hoy",
-        "resultado.*hoy", "pico.*jugadores", "jugadores.*ahora",
-        "steam chart", "steam charts", "player count", "player counts", "concurrent player",
-        "jugadores steam", "pico de jugadores", "cuántos jugadores", "cuantos jugadores",
-        "steam player", "charts player", "player count steam",
+        "hoy",
+        "ahora",
+        "actual",
+        "en este momento",
+        "en vivo",
+        "live",
+        "breaking",
+        "última hora",
+        "dólar blue",
+        "cotización",
+        "clima hoy",
+        "resultado hoy",
+        "pico jugadores",
+        "jugadores ahora",
+        "steam chart",
+        "steam charts",
+        "player count",
+        "player counts",
+        "concurrent player",
+        "jugadores steam",
+        "pico de jugadores",
+        "cuántos jugadores",
+        "cuantos jugadores",
+        "steam player",
+        "charts player",
+        "player count steam",
+        "latest",
+        "reciente",
+        "controvers",
+        "polémica",
+        "problemas",
+        "issues",
+        "drama",
+        "scandal",
+        "qué pasó",
+        "what happened",
+        "recent",
     )
     has_strong_fresh = any(k in t for k in strong_fresh)
 
     # Weaker time words that are often not enough by themselves
-    weak_time = ("precio", "dólar", "partido", "noticia", "resultados", "clima")
+    weak_time = (
+        "precio",
+        "dólar",
+        "partido",
+        "noticia",
+        "resultados",
+        "clima",
+        "issues",
+        "problemas",
+        "controvers",
+        "drama",
+        "scandal",
+    )
     has_weak_time = any(k in t for k in weak_time)
 
     needs_search = "none"
