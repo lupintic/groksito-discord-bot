@@ -37,6 +37,7 @@ DEFAULT_PRICING: dict[str, float] = {
 
 
 _recent_usage: deque[dict[str, Any]] = deque(maxlen=50)
+_recent_addressed: deque[dict[str, Any]] = deque(maxlen=50)  # Phase 1 addressed turn metrics (latency, choice, search offered)
 _session_totals: dict[str, float | int] = {
     "prompt_tokens": 0,
     "completion_tokens": 0,
@@ -300,3 +301,42 @@ def log_cache_metrics(
     )
 
     cache_logger.info(f"{cid_prefix()}{msg}")
+
+
+def log_addressed_turn_metrics(
+    *,
+    latency_ms: float,
+    prompt_tokens: int = 0,
+    search_schemas_offered: bool = False,
+    model_chose_search: bool = False,
+    model_chose_direct: bool = False,
+    query_need: str = "unknown",
+    **_: Any,  # tolerate future fields
+) -> None:
+    """Lightweight addressed-turn instrumentation (Ticket #7 Phase 1).
+
+    Structured [ADDRESSED] logs + append to small in-mem _recent_addressed deque.
+    (No p95 yet; logs enable before/after comparison of tokens/latency/choice on normal mentions.)
+    Called only on addressed turns from llm.py. Reuses existing token patterns + cid.
+    """
+    try:
+        entry = {
+            "ts": time.time(),
+            "latency_ms": round(float(latency_ms), 1),
+            "prompt_tokens": int(prompt_tokens or 0),
+            "search_schemas_offered": bool(search_schemas_offered),
+            "chose_search": bool(model_chose_search),
+            "chose_direct": bool(model_chose_direct),
+            "need": query_need or "unknown",
+        }
+        _recent_addressed.append(entry)
+
+        logger.info(
+            f"{cid_prefix()}[ADDRESSED] latency_ms={entry['latency_ms']} prompt={entry['prompt_tokens']} "
+            f"search_offered={str(entry['search_schemas_offered']).lower()} "
+            f"chose_search={str(entry['chose_search']).lower()} chose_direct={str(entry['chose_direct']).lower()} "
+            f"need={entry['need']}"
+        )
+    except Exception:
+        # metrics must never impact main path
+        pass

@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import Any, Optional
 
 from .correlation import cid_prefix
@@ -35,6 +36,7 @@ from .media_tools import has_explicit_video_intent, has_explicit_audio_intent
 
 # Import from the new sibling modules (clean separation)
 from .llm_input import build_responses_input
+from .context import should_generate_recent_summary, should_offer_light_decision_tools
 from .llm_utils import (
     _extract_final_text,
     _build_stub_response,
@@ -165,6 +167,8 @@ async def call_grok_for_groksito(
         user_id = input_data["user_id"]
         user_message_text = input_data["user_message_text"]
 
+        is_addressed = bool(is_mentioned or is_reply_to_bot)
+
         # =====================================================================
         # LIGHTWEIGHT SKILLS + DECISION LAYER (normal chat only)
         # Runs a tiny cache-friendly decision call, then optionally injects an
@@ -259,11 +263,28 @@ async def call_grok_for_groksito(
             has_context_signal = any(k in tlow for k in ("antes", "dijimos", "hablábamos", "qué pasó", "continúa", "de qué", "resumen de la", "la charla", "tema anterior", "what did we", "earlier", "previous", "contexto"))
             has_data_or_skill_signal = any(k in tlow for k in ("hoy", "ahora", "actual", "en vivo", "live", "pico", "jugadores", "precio", "cuántos", "crea", "create", "skill", "habilidad", "haz una", "quiero una", "mejora", "edita", "actualiza"))
 
-            # Offer on addressed turns, explicit creation/edit/pattern candidates, or when context/data language appears
-            if is_addressed or creation_candidate or edit_candidate or has_context_signal or has_data_or_skill_signal:
+            # Offer the heavy decision meta tools (create/edit/use_skill, get_recent_context, respond_directly)
+            # ONLY on explicit signals or strong candidates. Bare "is_addressed" (plain @mention) is
+            # NOT enough — it would bloat every normal question with 15k+ chars of meta schemas
+            # (create_skill descriptions etc.) even when no skill management is relevant.
+            # Recent context summary (lighter) is still injected for coherence on addressed turns
+            # via llm_input.py. This keeps normal chat prompts much smaller for lower latency.
+            if creation_candidate or edit_candidate or has_context_signal or has_data_or_skill_signal:
                 offer_decision_tools = True
         except Exception:
             offer_decision_tools = False
+
+        offer_light_decision_tools = False
+        try:
+            if should_offer_light_decision_tools(
+                user_message_text or user_message,
+                is_mentioned=is_mentioned,
+                is_reply_to_bot=is_reply_to_bot,
+                context_need=need,
+            ) and not offer_decision_tools:
+                offer_light_decision_tools = True
+        except Exception:
+            offer_light_decision_tools = False
 
         custom_tools = get_tools_for_request(
             query_need=need,
@@ -274,6 +295,7 @@ async def call_grok_for_groksito(
             pure_image_gen=pure_image_gen_intent,
             offer_create_skill_tool=offer_decision_tools,  # create_skill is included in the decision tool set
             offer_decision_tools=offer_decision_tools,
+            offer_light_decision_tools=offer_light_decision_tools,
         )
 
         # When a skill is (or will be) active and declares custom tools such as code_execution
@@ -309,8 +331,10 @@ async def call_grok_for_groksito(
         # We rely on previous_response_id for the model to retain knowledge of previously offered
         # tools (similar to how custom continuation tools are minimized). This saves significant
         # tokens on multi-round flows (the search tool descriptions are non-trivial).
-        if need in ("casual", "minimal", "image_gen"):
+        if need in ("casual", "image_gen") or (need == "minimal" and not is_addressed):
             # Explicit laziness in the main llm flow (builder will also return []).
+            # Relaxed for addressed minimal (Phase 1 agentic): plain @mentions that classify minimal
+            # still get native search schemas so Grok + respond_directly can decide; keeps classify for extremes.
             native_search_tools = []
         else:
             # Decision layer can now veto search schemas for clear "direct" cases.
@@ -351,7 +375,20 @@ async def call_grok_for_groksito(
             pass
 
         # Honor decision layer's opinion on recent context (lightweight nudge)
-        if decision and getattr(decision, "needs_recent_context", False) and not input_data.get("recent_context_block"):
+        # Gated by the same cheap predicate (perf fix): plain normal addressed timeless
+        # now skip the force-summary too (decision heuristic sets needs_recent on any addressed).
+        if (
+            decision
+            and getattr(decision, "needs_recent_context", False)
+            and not input_data.get("recent_context_block")
+            and should_generate_recent_summary(
+                user_message_text,
+                is_mentioned=is_mentioned,
+                is_reply_to_bot=is_reply_to_bot,
+                context_need=need,
+                has_x_link_intent=has_x_link_intent,
+            )
+        ):
             try:
                 from .context.context_summarizer import summarize_recent_conversation, format_recent_context_block
                 summary = await summarize_recent_conversation(channel_id)
@@ -386,6 +423,11 @@ async def call_grok_for_groksito(
         except Exception as log_err:
             logger.debug(f"{cid_p}[TOOLS] selection logging failed: {log_err}")
 
+        # Phase 1 (Ticket #7): lightweight instrumentation for addressed turns only.
+        # Capture start for first-turn + full tool loop latency; flag for search schemas offered.
+        addressed_turn_start = time.time() if is_addressed else None
+        search_schemas_offered = bool(native_search_tools)
+
         # First call to Responses API (vision images are sent here)
         # Uses retry helper for transients (429/5xx/timeout); non-transients (policy, auth, bad payload) fail fast for caller classification.
         try:
@@ -411,6 +453,20 @@ async def call_grok_for_groksito(
                     f"Images: {len(image_urls)}. Original error: {api_err}"
                 ) from api_err
             raise
+
+        # Capture first-turn prompt tokens for addressed metrics (minimal extraction, reuse patterns from _extract)
+        first_turn_prompt_tokens = 0
+        try:
+            usage = getattr(response, "usage", None)
+            if usage is None and isinstance(response, dict):
+                usage = response.get("usage")
+            if usage:
+                if hasattr(usage, "input_tokens"):
+                    first_turn_prompt_tokens = getattr(usage, "input_tokens", 0) or 0
+                elif isinstance(usage, dict):
+                    first_turn_prompt_tokens = usage.get("input_tokens", 0) or 0
+        except Exception:
+            first_turn_prompt_tokens = 0
 
         # Token logging for first turn
         category = "Vision" if image_urls else "Conversation"
@@ -485,6 +541,10 @@ async def call_grok_for_groksito(
 
             return "✅ Groksito procesó tu mensaje usando las herramientas (respuesta vía Responses API)."
 
+        # Choice flags for addressed metrics (set when we see the model invoke these during tool loop)
+        model_chose_search = False
+        model_chose_direct = False
+
         for round_num in range(1, max_tool_rounds + 1):
             client_tool_outputs = []
 
@@ -496,6 +556,12 @@ async def call_grok_for_groksito(
                 name = getattr(item, "name", None)
                 if name is None and isinstance(item, dict):
                     name = item.get("name")
+
+                # Track model choice for addressed-turn instrumentation (native search vs respond_direct)
+                if name in ("web_search", "x_search"):
+                    model_chose_search = True
+                if name == "respond_directly":
+                    model_chose_direct = True
 
                 raw_args = getattr(item, "arguments", None)
                 if raw_args is None and isinstance(item, dict):
@@ -706,6 +772,22 @@ async def call_grok_for_groksito(
                 is_tool_continuation=True,
                 cache_context=continuation_cache_context,
             )
+
+        # Emit addressed-turn metrics (Ticket #7 Phase 1 instrumentation) only for addressed; lightweight + defensive.
+        if is_addressed and addressed_turn_start is not None:
+            try:
+                latency_ms = (time.time() - addressed_turn_start) * 1000.0
+                from .token_usage import log_addressed_turn_metrics
+                log_addressed_turn_metrics(
+                    latency_ms=latency_ms,
+                    prompt_tokens=first_turn_prompt_tokens,
+                    search_schemas_offered=search_schemas_offered,
+                    model_chose_search=model_chose_search,
+                    model_chose_direct=model_chose_direct,
+                    query_need=need or "unknown",
+                )
+            except Exception:
+                pass  # never break main flow for metrics
 
         # =====================================================================
         # AUTOMATIC SKILL CREATION (recurring need detection) — after the main work

@@ -25,6 +25,7 @@ from .context import (
     classify_query_context_need,
     is_pure_image_generation_request,
     is_conversation_meta_question,
+    should_generate_recent_summary,
 )
 from .token_usage import log_context_injection
 
@@ -262,20 +263,33 @@ async def build_responses_input(
     if _enable_recent is None:
         _enable_recent = getattr(settings, "enable_recent_context", True)
 
+    # Gated via cheap local predicate (added for perf on normal @mentions).
+    # Only pay the summarize_recent_conversation pre-call (extra roundtrip + tokens)
+    # on meta / referent / fresh signals / rich / x on addressed. Plain addressed
+    # normal/minimal timeless now skip (raw fallback + native ctx + tool still available).
     should_use_recent_context = (
         _enable_recent
-        and (is_reply_to_bot or is_mentioned or is_conversation_meta_question(user_message_text))
+        and should_generate_recent_summary(
+            user_message_text,
+            is_mentioned=is_mentioned,
+            is_reply_to_bot=is_reply_to_bot,
+            context_need=need,
+            has_x_link_intent=has_x_link_intent,
+        )
     )
     if should_use_recent_context:
         logger.info(f"{cid_prefix()}[CONTEXT] Attempting recent conversation context summary (mentioned={is_mentioned}, reply_to_bot={is_reply_to_bot})")
+        import time as _t
+        _t0 = _t.time()
         try:
             from .context.context_summarizer import summarize_recent_conversation, format_recent_context_block
             summary = await summarize_recent_conversation(channel_id)
+            _dt = (_t.time() - _t0) * 1000
             if summary:
                 recent_context_block = format_recent_context_block(summary)
-                logger.info(f"{cid_prefix()}[CONTEXT] Injected Recent Conversation Context (~{len(summary)} chars)")
+                logger.info(f"{cid_prefix()}[CONTEXT] Injected Recent Conversation Context (~{len(summary)} chars) in {_dt:.0f}ms")
             else:
-                logger.info(f"{cid_prefix()}[CONTEXT] Recent conversation context was empty (no useful summary produced)")
+                logger.info(f"{cid_prefix()}[CONTEXT] Recent conversation context was empty (no useful summary produced) after {_dt:.0f}ms")
         except Exception as e:
             logger.warning(f"{cid_prefix()}[CONTEXT] Recent conversation context summarization failed (non-fatal): {e}")
 

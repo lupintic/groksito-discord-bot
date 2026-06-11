@@ -134,11 +134,9 @@ def _get_recent_context_schema() -> dict:
         "name": "get_recent_context",
         "description": (
             "Fetch a compact, high-signal summary of the recent conversation history in this channel. "
-            "Call this tool (instead of guessing) when the user references prior turns ('qué dijimos antes', "
-            "'continúa de lo que hablábamos', 'what were we talking about earlier', 'de qué hablábamos'), "
-            "when long context is needed for coherence, or when grounding a response in recent events. "
-            "Only call when genuinely useful — the summary is generated on demand and helps the model "
-            "stay consistent without bloating every prompt."
+            "ONLY call get_recent_context when the user explicitly references prior turns ('qué dijimos antes', 'continúa de lo que hablábamos', 'what were we talking about earlier', 'de qué hablábamos', 'el tema anterior') or when coherence on recent addressed context is clearly needed. "
+            "Do NOT call for timeless or standalone questions — prefer respond_directly (or direct knowledge) instead. "
+            "The summary is generated on demand only when useful."
         ),
         "parameters": {
             "type": "object",
@@ -163,7 +161,7 @@ def _use_skill_schema() -> dict:
             "When you call this tool successfully, the tool RESULT will contain a [SKILL ACTIVE: ...] block with the precise instructions and constraints. "
             "YOU MUST FOLLOW THOSE INSTRUCTIONS EXACTLY in your final response for this query. Do not deviate, do not add extra commentary outside the skill's style, and ONLY use the tools listed as allowed for the skill. "
             "Call this (instead of generic behavior) when the user explicitly says things like 'usa la skill X', 'use the skill for steam charts', or when a known approved skill perfectly matches the need. "
-            "Provide the exact skill name (preferred) or id."
+            "Provide the exact skill name (preferred) or id. For normal addressed questions without a matching approved skill, prefer respond_directly."
         ),
         "parameters": {
             "type": "object",
@@ -259,9 +257,9 @@ def _respond_directly_schema() -> dict:
         "type": "function",
         "name": "respond_directly",
         "description": (
-            "Explicitly decide that you have all the information you need (from history, prior tool results, "
-            "or built-in knowledge) and will now produce the final answer to the user without calling any more tools. "
-            "Use this on turns where you were offered decision tools but determined that direct response is best."
+            "Call respond_directly (preferred default for most normal addressed turns) when the question is timeless, general knowledge, definitions, history, or matches direct criteria (no fresh/time-sensitive need). "
+            "Explicitly decide that you have all the information you need (from history, prior tool results, or built-in knowledge) and will now produce the final answer to the user without calling any more tools (including no search). "
+            "Only skip this for clear fresh-data cases that require web_search/x_search or get_recent_context on references. Aligns with: be direct on timeless topics, proactive only on recent/variable."
         ),
         "parameters": {
             "type": "object",

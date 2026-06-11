@@ -312,10 +312,10 @@ def _build_native_search_tools(
             "type": "web_search",
             "description": (
                 "Search the web for up-to-date information (news, prices e.g. USD, weather, sports, recent events, "
-                "changing data). Use proactively ONLY for time-sensitive or variable facts that improve accuracy "
-                "over your training cutoff: 'what is happening', current prices (e.g. dólar), live scores, "
-                "breaking news, weather, or very recent events. NEVER use for general knowledge, history, "
-                "definitions, math, code, or timeless topics — answer from your knowledge.\n\n"
+                "changing data). Use web_search ONLY for clear time-sensitive or variable facts that improve accuracy "
+                "over training cutoff (e.g. current prices like dólar, live scores, breaking news, weather, very recent events, 'qué pasó hoy'). "
+                "PREFER respond_directly (or direct knowledge) for timeless/general knowledge, history, definitions, math, code, or non-fresh topics — never search those. "
+                "Be proactive on recent/variable; direct on timeless.\n\n"
                 "EFFICIENT USAGE (MANDATORY - this directly reduces tokens on every search turn):\n"
                 "- MUST craft the *narrowest, most specific* query possible that targets exactly the fact (e.g. "
                 "'dólar blue hoy Argentina site:ambito.com' or 'resultado boca river live' — never broad 'dólar' or 'partido').\n"
@@ -330,11 +330,11 @@ def _build_native_search_tools(
         x_tool = {
             "type": "x_search",
             "description": (
-                "Search posts, threads, opinions and recent activity on X (Twitter). Use ONLY for clear "
+                "Search posts, threads, opinions and recent activity on X (Twitter). Use x_search ONLY for clear "
                 "X/Twitter-specific needs: tweets, real-time reactions, trending topics, current event "
                 "commentary on X, profiles, or content behind x.com links. Mentions of 'on X', 'tweet', "
                 "x.com links, 'qué dicen en X/Twitter', or 'trending' are strong signals. Ideal for social "
-                "pulse/context that web_search captures poorly.\n\n"
+                "pulse/context that web_search captures poorly. For general/non-X 'qué opinan' prefer respond_directly or web_search.\n\n"
                 "EFFICIENT USAGE (MANDATORY - X result sets are especially verbose; this is a major token lever):\n"
                 "- Use *only* when query is explicitly about X activity (do not default here for general 'qué opinan' or 'qué dicen').\n"
                 "- From results: keep *AT MOST 1-2 posts/reactions* (the most on-point). Discard noise, duplicates, low-signal replies, full threads, and timelines immediately.\n"
