@@ -152,6 +152,8 @@ python -m src.groksito_discord --status
 
 Run tests with `pytest` (see `tests/` for coverage of skills, sandbox, health, config safety, etc.).
 
+**Note:** The global `implement-ticket` skill is available. Use `/implement-ticket #42` (or a full issue URL) to implement GitHub issues for this project.
+
 ## License
 
 See the repository for licensing information.
