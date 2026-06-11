@@ -259,8 +259,13 @@ async def call_grok_for_groksito(
             has_context_signal = any(k in tlow for k in ("antes", "dijimos", "hablábamos", "qué pasó", "continúa", "de qué", "resumen de la", "la charla", "tema anterior", "what did we", "earlier", "previous", "contexto"))
             has_data_or_skill_signal = any(k in tlow for k in ("hoy", "ahora", "actual", "en vivo", "live", "pico", "jugadores", "precio", "cuántos", "crea", "create", "skill", "habilidad", "haz una", "quiero una", "mejora", "edita", "actualiza"))
 
-            # Offer on addressed turns, explicit creation/edit/pattern candidates, or when context/data language appears
-            if is_addressed or creation_candidate or edit_candidate or has_context_signal or has_data_or_skill_signal:
+            # Offer the heavy decision meta tools (create/edit/use_skill, get_recent_context, respond_directly)
+            # ONLY on explicit signals or strong candidates. Bare "is_addressed" (plain @mention) is
+            # NOT enough — it would bloat every normal question with 15k+ chars of meta schemas
+            # (create_skill descriptions etc.) even when no skill management is relevant.
+            # Recent context summary (lighter) is still injected for coherence on addressed turns
+            # via llm_input.py. This keeps normal chat prompts much smaller for lower latency.
+            if creation_candidate or edit_candidate or has_context_signal or has_data_or_skill_signal:
                 offer_decision_tools = True
         except Exception:
             offer_decision_tools = False
