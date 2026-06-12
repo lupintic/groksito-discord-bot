@@ -576,6 +576,39 @@ async def call_grok_for_groksito(
                 if call_id is None and isinstance(item, dict):
                     call_id = item.get("call_id") or item.get("id")
 
+                # Simple debug logging for tool selection *decisions by Grok* (ticket #25).
+                # Lightweight + gated by the existing log_tool_selection flag (easy to enable/disable;
+                # default True). Focuses on main decision points the model reaches via native tool calling
+                # (when search chosen, when recent context requested via get_recent_context, respond_directly
+                # vs tools, skill activation, etc.). Particularly useful on normal @mentions where the
+                # light decision tool pair (respond_directly + get_recent_context) is offered to let the
+                # model decide. Non-intrusive, best-effort, no sensitive values logged, trivial to remove.
+                # Uses tools_logger to match other structured tool/decision logs (log_tool_selection etc).
+                try:
+                    from .config import settings as _s
+                    if getattr(_s, "log_tool_selection", True):
+                        from .tools import tools_logger as _tl
+                        DECISION_TOOL_NAMES = {
+                            "web_search",
+                            "x_search",
+                            "get_recent_context",
+                            "respond_directly",
+                            "use_skill",
+                            "create_skill",
+                            "edit_skill",
+                        }
+                        if name in DECISION_TOOL_NAMES:
+                            _arg_keys = (
+                                list((raw_args or {}).keys())
+                                if isinstance(raw_args, dict)
+                                else []
+                            )
+                            _tl.info(
+                                f"{cid_p}[GROK_CHOICE] tool={name} | round={round_num} | keys={_arg_keys} | addressed={is_addressed}"
+                            )
+                except Exception:
+                    pass
+
                 logger.info(f"{cid_p}[LLM] Round {round_num}: executing custom tool '{name}' (args keys: {list((raw_args or {}).keys()) if isinstance(raw_args, dict) else 'n/a'})")
 
                 available = (name in offered_custom_tool_names) if 'offered_custom_tool_names' in locals() else "unknown"
