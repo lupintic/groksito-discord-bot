@@ -149,11 +149,13 @@ class TestContinuationToolMinimization:
 
 
 class TestLightDecisionOffer:
-    """Ticket #7 Phase 1: light decision (respond+get_recent only) on plain addressed normal/minimal without strong signals.
-    Full heavy (create/edit/use) only on offer_decision_tools (strong signals). No bloat on plain addressed.
+    """Light decision tools (core Discord delivery actions + respond/get_recent) on plain addressed normal/minimal.
+    Core delivery tools (reply_to_user, react_to_message, create_thread) are offered here to let the model choose
+    *how* to interact (implements #21). Full heavy (create/edit/use) only on offer_decision_tools (strong signals).
+    No bloat on plain addressed without the offer flag.
     """
 
-    def test_light_decision_on_normal_offers_only_respond_and_recent(self, patch_video_enabled):
+    def test_light_decision_on_normal_offers_delivery_actions_and_signals(self, patch_video_enabled):
         patch_video_enabled(True)
         tools = get_tools_for_request(
             query_need="normal",
@@ -162,14 +164,18 @@ class TestLightDecisionOffer:
             offer_decision_tools=False,
         )
         names = _tool_names(tools)
+        # Core Discord actions for agency (reply, react, thread) + decision signals
+        assert "reply_to_user" in names
+        assert "react_to_message" in names
+        assert "create_thread" in names
         assert "respond_directly" in names
         assert "get_recent_context" in names
         # no heavy bloat
         assert "create_skill" not in names
         assert "edit_skill" not in names
         assert "use_skill" not in names
-        # other core not forced here
-        assert len(names) <= 2
+        # 5 delivery + decision tools expected under light path (was 2 before #21)
+        assert len(names) <= 5
 
     def test_full_decision_still_offers_heavy(self, patch_video_enabled):
         patch_video_enabled(True)
@@ -185,6 +191,10 @@ class TestLightDecisionOffer:
         assert "create_skill" in names
         assert "edit_skill" in names
         assert "use_skill" in names
+        # Discord delivery actions are also available under full decision offering (#21)
+        assert "reply_to_user" in names
+        assert "react_to_message" in names
+        assert "create_thread" in names
 
     def test_light_on_minimal_addressed_sim(self, patch_video_enabled):
         patch_video_enabled(True)

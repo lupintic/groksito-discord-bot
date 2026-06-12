@@ -6,6 +6,8 @@ and provides the execution dispatcher used by the LLM layer.
 
 Key features:
 - Tiered tool selection (lightweight core for normal turns, ultra-minimal on continuations)
+- Core Discord delivery actions exposed as native tools (reply_to_user, react_to_message, create_thread)
+  so the model can choose *how* to deliver responses (reply vs reaction vs threaded) for greater agency.
 - Uses media_tools for image/video generation
 - Respects the centralized config (ENABLE_VIDEO_GENERATION etc.)
 - Sandboxed power tools (code_execution, playwright_browser) live in sandbox.py
@@ -183,6 +185,64 @@ async def execute_hybrid_tool(
                 return "Message sent directly to the user."
             return content
 
+        if name == "react_to_message":
+            if not original_message:
+                return "Cannot react: missing original message context for this turn."
+            emoji = str(args.get("emoji", "")).strip()
+            if not emoji:
+                return "react_to_message requires a non-empty 'emoji' (Unicode emoji or custom markup)."
+            try:
+                # Best-effort normalization for custom guild emojis (if model used :shortcode:).
+                try:
+                    from . import emoji_registry
+                    gid = getattr(getattr(original_message, "guild", None), "id", None)
+                    emoji = emoji_registry.normalize_bot_emoji_output(emoji, gid)
+                except Exception:
+                    pass
+                await original_message.add_reaction(emoji)
+                return f"Reaction {emoji} added successfully."
+            except Exception as e:
+                # Common failures: invalid emoji, missing 'Add Reactions' permission, trying to react to a message the bot can't see.
+                return f"Failed to add reaction '{emoji}': {str(e)[:120]}. Verify emoji is valid Unicode or full <:name:ID> custom form and that the bot has Add Reactions permission in this channel."
+
+        if name == "create_thread":
+            if not original_message:
+                return "Cannot create thread: missing original message context for this turn."
+            thread_name = str(args.get("name", "Discussion")).strip()[:100] or "Discussion"
+            content = str(args.get("content", "")).strip()
+            if not content:
+                return "create_thread requires non-empty 'content' for the initial thread message."
+            try:
+                # Normalize any custom emoji shortcodes in the posted content.
+                try:
+                    from . import emoji_registry
+                    gid = getattr(getattr(original_message, "guild", None), "id", None)
+                    content = emoji_registry.normalize_bot_emoji_output(content, gid)
+                except Exception:
+                    pass
+
+                thread = await original_message.create_thread(name=thread_name)
+                # Send the opening content inside the thread.
+                await thread.send(content)
+
+                # Log the bot utterance under the *thread's* channel id so context/summaries work if user continues there.
+                try:
+                    from . import context as ctx
+                    ctx.update_from_message(
+                        channel_id=thread.id,
+                        user_id=0,
+                        author_name="Groksito",
+                        content=content or "",
+                        is_bot=True,
+                    )
+                except Exception:
+                    pass
+
+                return f"Thread created successfully with name '{thread_name}'. Initial message posted. Future conversation can continue inside the thread (ID={thread.id})."
+            except Exception as e:
+                # Common: missing Create Threads / Send Messages in Threads permission, rate limits, bad name chars, archived parent, etc.
+                return f"Failed to create thread '{thread_name}' or post initial message: {str(e)[:140]}. You can still deliver via reply_to_user as a safe fallback."
+
         if name == "generate_image":
             return await _handle_generate_image(args, original_message)
 
@@ -279,13 +339,66 @@ def _get_reply_to_user_schema_light() -> dict:
     return {
         "type": "function",
         "name": "reply_to_user",
-        "description": "Sends the provided content as a direct reply to the user's message in the Discord channel. This is the primary delivery mechanism for the bot's final text responses and is also used to complete media generation flows (images, video, audio) via the direct-delivery pattern without duplicate messages.",
+        "description": "Sends the provided content as a direct reply to the user's message in the Discord channel. This is the primary delivery mechanism for the bot's final text responses and is also used to complete media generation flows (images, video, audio) via the direct-delivery pattern without duplicate messages.\n\n"
+        "Use this when you have a complete answer ready and want to deliver it as a standard reply (the most common delivery choice). The content is posted as your message in the conversation. Supports Discord-flavored markdown and emoji shortcodes (custom guild emojis will be normalized if possible). Prefer this over letting a raw assistant message be auto-sent when you want explicit control or to combine with reactions/threads in the same turn.",
         "parameters": {
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "The text to send as the reply (supporting emoji shortcodes and basic formatting)."}
             },
             "required": ["content"]
+        }
+    }
+
+
+def _get_react_to_message_schema_light() -> dict:
+    """Lightweight schema for reacting to the triggering user message.
+
+    Offered alongside other delivery actions on addressed turns (via light decision / decision flags)
+    and allows the model to express quick feedback, acknowledgement, or personality without a full text reply.
+    """
+    return {
+        "type": "function",
+        "name": "react_to_message",
+        "description": "Adds a reaction emoji to the user's original message. This is a lightweight, non-text way to acknowledge, agree, celebrate, or express sentiment (e.g. thumbs up for a good point, eyes for interesting, or a custom guild emoji for fun).\n\n"
+        "When to use:\n"
+        "- Quick positive/negative feedback without cluttering the channel with another message.\n"
+        "- Acknowledge receipt or completion of a request ('done' via ✅).\n"
+        "- Add personality or engagement (😂, ❤️, custom emotes).\n\n"
+        "Safety & scope: Only reacts to the current user message in the current channel/guild (no arbitrary targets). The bot must have 'Add Reactions' permission in the channel. Use standard Unicode emoji (👍, ✅, 🔥, 👀, ❤️) or the full custom emoji form if you know a guild emote ID (e.g. '<:groksito:123456789012345678>'). Shortcodes like :thumbsup: may be normalized automatically.\n\n"
+        "You can combine this tool with reply_to_user or create_thread in parallel if it makes sense (e.g. react + thoughtful reply).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "emoji": {"type": "string", "description": "The emoji to react with. Unicode (👍, ✅) preferred for reliability. Custom: full markup '<:name:ID>' or name if normalization available."}
+            },
+            "required": ["emoji"]
+        }
+    }
+
+
+def _get_create_thread_schema_light() -> dict:
+    """Lightweight schema for spawning a thread off the user's message and posting into it."""
+    return {
+        "type": "function",
+        "name": "create_thread",
+        "description": "Creates a new Discord thread attached to the user's message and posts the provided content as the first message inside that thread.\n\n"
+        "Use this for:\n"
+        "- Longer or multi-step explanations that would otherwise flood the main channel.\n"
+        "- Side discussions, detailed troubleshooting, or topic organization (e.g. 'Build discussion for Path of Exile 2').\n"
+        "- Keeping the main channel clean while still giving a rich answer.\n\n"
+        "The thread is created under the original user message (visible context). The initial content you provide is sent inside the thread immediately. After creation you can be messaged in the thread on future turns if the user follows up there.\n\n"
+        "Parameters:\n"
+        "- name: short, clear thread title (Discord will show this prominently; keep under ~80 chars).\n"
+        "- content: the full text to post as the opening message in the thread (supports formatting + emojis).\n\n"
+        "Safety & scope: Thread is created in the same channel/guild as the conversation. No ability to target other channels or guilds. Bot needs 'Create Public Threads' (or Private) permission + Send Messages in Threads. Threads auto-archive after inactivity per server settings. If creation fails (perms, rate limit, name too long), the error is returned so you can fallback to a normal reply_to_user instead.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Short descriptive title for the new thread (e.g. 'PoE2 detailed build help', 'Dolar blue history thread')."},
+                "content": {"type": "string", "description": "Initial message posted inside the thread. Use full answer or structured content here."}
+            },
+            "required": ["name", "content"]
         }
     }
 
@@ -534,8 +647,9 @@ def get_tools_for_request(
     # (explicit visual for media). 
     # Casual / minimal / normal / rich chat: ZERO custom tools (no history tools in simplified model).
     # The base model just responds (with only referenced message injected on bot-replies).
-    # reply_to_user is available on continuations (via previous_response_id) for direct delivery.
-    # This is the key change for "feels like real Grok who happens to be named Groksito".
+    # reply_to_user (plus react_to_message / create_thread) become available when light/full decision tools are offered
+    # (plain addressed turns) or on continuations, giving the model explicit choice over delivery style.
+    # This advances the agentic goal (see ticket #21 and Target Architecture #9).
     if query_need == "casual" and not offer_light_decision_tools and not offer_decision_tools:
         return []
 
@@ -574,12 +688,20 @@ def get_tools_for_request(
             tools.append(_get_recent_context_schema())
             tools.append(_use_skill_schema())
             tools.append(_respond_directly_schema())
+            # Surface core Discord actions (reply/react/thread) under full decision offering too so model has consistent choice of delivery style.
+            tools.append(_get_reply_to_user_schema_light())
+            tools.append(_get_react_to_message_schema_light())
+            tools.append(_get_create_thread_schema_light())
         except Exception:
             pass
     elif offer_light_decision_tools:
-        # Light decision only (plain addressed normal/minimal): the two small schemas only.
-        # Keeps schema size under control; heavy (create/edit/use) stay behind strong signals.
+        # Light decision only (plain addressed normal/minimal): core delivery actions (reply/react/thread)
+        # plus the decision signals (get_recent + respond_directly). Heavy skill tools (create/edit/use) stay behind strong signals.
+        # This is the primary path that lets Grok choose *how* to deliver on normal addressed turns (the agentic direction).
         try:
+            tools.append(_get_reply_to_user_schema_light())
+            tools.append(_get_react_to_message_schema_light())
+            tools.append(_get_create_thread_schema_light())
             tools.append(_get_recent_context_schema())
             tools.append(_respond_directly_schema())
         except Exception:
