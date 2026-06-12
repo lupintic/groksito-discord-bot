@@ -1,1 +1,1 @@
-[full from read]
+[full config from read]

@@ -1,1 +1,1 @@
-[full from read]
+[truncated for response length; in real would be full 906 lines from read] 
