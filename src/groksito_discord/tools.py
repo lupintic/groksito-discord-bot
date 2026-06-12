@@ -68,7 +68,7 @@ def _generate_image_schema() -> dict:
         "type": "function",
         "name": "generate_image",
         "description": (
-            "Generate an image using Grok Imagine (grok-imagine-image).\n\n"
+            "Generate an image using Grok Imagine (grok-imagine-image). Best for explicit user requests to create or visualize a scene, character, or concept.\n\n"
             "**PERMISSIVE RULE FOR SUGGESTIVE CONTENT (fantasy/anime style - Grok-native):**\n"
             "The API allows quite suggestive content in stylized styles: curvy, busty, tetona, culona, sexy, voluptuous, bikini, lingerie, tight dress, sexy pose, etc.\n\n"
             "- **Allow and preserve the essence** for 'chica tetona en bikini', 'waifu culona gótica', 'sexy curvy en lencería', 'busty micro bikini', 'sexy pose', 'voluptuous'. Keep curves/bust/hips/pose/revealing clothing (no explicit). NO to generic 'elegant'.\n"
@@ -95,7 +95,7 @@ def _generate_image_schema_tiny() -> dict:
         "type": "function",
         "name": "generate_image",
         "description": (
-            "Generate image (ultra-light mode).\n"
+            "Generate image (ultra-light mode for pure creation requests).\n"
             "**PERMISSIVE RULE:** For suggestive fantasy 'tetona en bikini', 'culona sexy', 'sexy curvy', 'busty en lencería' → PASS AS CLOSE AS POSSIBLE (keep 'busty','curvy','sexy','tetona','culona',bikini/lingerie). Only reformulate on full nude/explicit sex/explicit genitals. API allows lots of suggestive anime/fantasy. User never sees filter meta."
         ),
         "parameters": {
@@ -114,11 +114,11 @@ def _edit_image_schema() -> dict:
     return {
         "type": "function",
         "name": "edit_image",
-        "description": "Edit reference image. Artistic/stylized instructions. Avoid requesting explicit or sexual transformations (guide style/atmosphere; refs are already visual, no explicit anatomy).",
+        "description": "Edit or transform a reference image according to artistic or stylistic instructions (e.g. change style, mood, clothing, setting, or apply creative variations). The reference image provides the visual base. Guide toward artistic/stylized outcomes; avoid requests that would require explicit or sexual anatomical changes on the provided reference.",
         "parameters": {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "artistic instructions"},
+                "prompt": {"type": "string", "description": "Artistic or stylistic transformation instructions (style, atmosphere, composition, reimagination cues)."},
                 "aspect_ratio": {"type": "string"}
             },
             "required": ["prompt"]
@@ -265,7 +265,7 @@ def _get_channel_context_schema_light() -> dict:
     return {
         "type": "function",
         "name": "get_channel_context",
-        "description": "Recent messages from the channel.",
+        "description": "Fetches a window of the most recent messages from the current Discord channel. Provides raw recent activity when the ongoing conversation or references in the thread make channel history relevant to formulating a good reply.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -279,11 +279,11 @@ def _get_reply_to_user_schema_light() -> dict:
     return {
         "type": "function",
         "name": "reply_to_user",
-        "description": "Direct reply.",
+        "description": "Sends the provided content as a direct reply to the user's message in the Discord channel. This is the primary delivery mechanism for the bot's final text responses and is also used to complete media generation flows (images, video, audio) via the direct-delivery pattern without duplicate messages.",
         "parameters": {
             "type": "object",
             "properties": {
-                "content": {"type": "string", "description": "text"}
+                "content": {"type": "string", "description": "The text to send as the reply (supporting emoji shortcodes and basic formatting)."}
             },
             "required": ["content"]
         }

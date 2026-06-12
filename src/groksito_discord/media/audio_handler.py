@@ -252,12 +252,10 @@ def _generate_audio_schema() -> dict:
         "type": "function",
         "name": "generate_audio",
         "description": (
-            "Genera audio (TTS / texto a voz) a partir de un texto usando la API oficial de xAI. "
-            "Úsalo cuando el usuario pida explícitamente leer en voz alta, generar audio, "
-            "dilo en voz, TTS, 'léelo', 'lee esto en voz alta', etc. "
-            "No lo uses para preguntas genéricas sobre texto. "
-            "Soporta voces: eve (predet., energética), ara (cálida), rex (profesional), sal (equilibrada), leo (autoritaria). "
-            "Idiomas BCP-47: 'es', 'es-ES', 'es-MX', 'en', 'auto', etc. El parámetro language es obligatorio en la API."
+            "Generates spoken audio (TTS / text-to-speech) from input text using the official xAI TTS API. "
+            "Useful for explicit user requests to read content aloud, produce voice output, TTS, 'léelo en voz alta', 'dilo', 'genera audio', etc. "
+            "Supports multiple voices (eve energetic default, ara warm, rex professional, sal balanced, leo authoritative) and languages via BCP-47 codes. "
+            "Language parameter is required by the API."
         ),
         "parameters": {
             "type": "object",

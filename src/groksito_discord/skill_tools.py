@@ -43,13 +43,8 @@ def _create_skill_schema() -> dict:
         "type": "function",
         "name": "create_skill",
         "description": (
-            "Create and immediately activate (approved=True) a new reusable skill for Groksito. "
-            "A skill bundles specialized instructions + a minimal set of allowed tools so that "
-            "future similar queries can be handled more consistently, quickly, and with lower token cost.\n\n"
-            "Only call this tool when it makes sense to create a long-term reusable capability:\n"
-            "- The user explicitly asks (\"crea una skill para...\", \"create a skill that does...\", \"haz una skill para consultar...\").\n"
-            "- OR the conversation shows a clear recurring pattern for fresh/time-sensitive data (player counts, prices, live scores, X sentiment, etc.) that would benefit from dedicated behavior.\n\n"
-            "NEVER call for one-off questions, casual chat, or in-game 'skills'/builds/abilities (PoE, Diablo, etc. character theorycrafting).\n\n"
+            "Create a new reusable skill for Groksito that bundles highly detailed, prescriptive instructions together with a minimal curated set of allowed tools. "
+            "Once approved, matching future queries can be handled with greater consistency, lower latency, and better specialization than generic reasoning.\n\n"
             "CRITICAL INSTRUCTIONS FOR THE 'instructions' PARAMETER (this is the most important part of the skill and determines whether it will actually be useful later):\n"
             "- The instructions you write will be injected as a high-priority system message. They must be extremely DETAILED, STEP-BY-STEP, and PRESCRIPTIVE.\n"
             "- Use strong directive language: ALWAYS, NEVER, EXACTLY, MUST, ONLY, FORMAT AS, STEP 1:, etc.\n"
@@ -132,10 +127,9 @@ def _get_recent_context_schema() -> dict:
         "type": "function",
         "name": "get_recent_context",
         "description": (
-            "ONLY call get_recent_context when the current user question explicitly or strongly references the recent conversation history in this channel and you need a compact summary to answer accurately or stay coherent. Strong signals: 'qué dijimos antes', 'continúa de lo que hablábamos', 'what were we talking about earlier', 'de qué hablábamos', 'el tema anterior', 'la charla de antes', or similar references to prior turns/messages. "
-            "Also appropriate for addressed follow-ups where the thread topic has shifted and raw history alone is insufficient. "
-            "Do NOT call for standalone, timeless, or general questions (definitions, 'qué es X', current events without chat reference) — prefer respond_directly (or direct knowledge + native search if fresh data needed) instead. "
-            "The summary is generated on demand only when useful; it is a targeted tool, not a default. After getting the summary, you will typically call respond_directly or another tool to finalize."
+            "Fetches a compact, targeted on-demand summary of recent messages in the current Discord channel. "
+            "Helpful when the user's question refers to or continues prior discussion, shared context, or earlier turns in the thread, and a synthesized overview would improve coherence or accuracy beyond what the immediate message buffer provides. "
+            "After receiving the summary you can reason further or call respond_directly (or other tools) to deliver the final answer. The summary is produced only when explicitly requested."
         ),
         "parameters": {
             "type": "object",
@@ -157,10 +151,8 @@ def _use_skill_schema() -> dict:
         "name": "use_skill",
         "description": (
             "Activate one of the existing approved skills for the current user query. "
-            "When you call this tool successfully, the tool RESULT will contain a [SKILL ACTIVE: ...] block with the precise instructions and constraints. "
-            "YOU MUST FOLLOW THOSE INSTRUCTIONS EXACTLY in your final response for this query. Do not deviate, do not add extra commentary outside the skill's style, and ONLY use the tools listed as allowed for the skill. "
-            "Call this (instead of generic behavior) when the user explicitly says things like 'usa la skill X', 'use the skill for steam charts', or when a known approved skill perfectly matches the need. "
-            "Provide the exact skill name (preferred) or id. For normal addressed questions without a matching approved skill, prefer respond_directly."
+            "When successful, the tool result provides a [SKILL ACTIVE: ...] block containing the skill's precise instructions and allowed tools. Follow those instructions exactly in the final response, using only the declared tools and matching the skill's intended style and output contract. "
+            "Best when the current request closely matches the documented purpose of an approved, reusable skill (for consistency, specialized behavior, or efficiency on recurring patterns). Provide the skill name or id."
         ),
         "parameters": {
             "type": "object",
@@ -186,15 +178,8 @@ def _edit_skill_schema() -> dict:
         "type": "function",
         "name": "edit_skill",
         "description": (
-            "Edit an existing approved skill (most commonly to improve or update its instructions). "
-            "Identify the skill by name or id. Provide the new instructions (and optionally new name or allowed tools).\n\n"
-            "CALL THIS when the user explicitly asks to improve/edit/update a specific existing skill, e.g.:\n"
-            "- \"mejora las instrucciones de la skill Steam Player Counts\"\n"
-            "- \"edita la skill de precios para que sea más concisa\"\n"
-            "- \"actualiza la skill X para incluir más detalles\"\n"
-            "- \"mejora la skill que creamos antes para steam charts\"\n\n"
-            "DO NOT use create_skill if the user is referring to modifying an existing one — that creates duplicates.\n"
-            "Prefer editing the most relevant matching approved skill. After editing, the skill becomes immediately usable with the new instructions.\n\n"
+            "Edit an existing approved skill (most commonly to improve or update its instructions, name, or allowed tools). "
+            "Identify the skill by name or id. Provide the new instructions (and optionally new name or allowed tools). Editing keeps a single canonical version instead of proliferating duplicates via create_skill.\n\n"
             "SENIOR ENGINEER MINDSET FOR EDITS — Act autonomously like a senior engineer performing a code review and refactor (not literal prompt following):\n"
             "1. **Diagnose first**: Before proposing any change, analyze *why* the current skill is insufficient or failing (e.g. 'web_search returns incomplete/stale data because the target is JS-heavy and frequently blocked — a simple prompt tweak won't fix the root architectural issue').\n"
             "2. **Evaluate if a deeper change is warranted**: Is this a case for better instructions only, or does it require changing the allowed_tools (switching to or adding playwright_browser/code_execution), or generating a reusable extraction script that lives in the instructions and gets executed via code_execution for reliability?\n"
@@ -256,12 +241,10 @@ def _respond_directly_schema() -> dict:
         "type": "function",
         "name": "respond_directly",
         "description": (
-            "PREFERRED DEFAULT for plain/normal addressed mentions and most timeless or general-knowledge questions. "
-            "Call respond_directly (and produce the final answer) when the query is definitional, historical, math, code, timeless facts, or you already have enough from built-in knowledge + any provided context/recent history to answer accurately without external tools. "
-            "Explicitly decide: 'I have everything needed right now' and output the complete user-facing reply with no further tool calls (no search, no get_recent_context). "
-            "Use this on typical @mentions like 'qué es X', 'cuánto es Y en general', explanations of known topics, or when search would not improve the answer. "
-            "Skip ONLY for clear fresh/time-sensitive needs (current prices, live events, 'qué pasó hoy', breaking news) that require web_search/x_search, or when the user references prior turns in this chat and get_recent_context is required for coherence. "
-            "Aligns with core directive: be direct on timeless; proactive on recent/variable. This keeps responses fast and low-token for everyday Discord questions."
+            "Explicit signal that you will now produce the final, user-facing reply using your built-in knowledge, the provided conversation context, referenced messages, and any information already gathered from prior tool calls. "
+            "A strong choice for definitional, explanatory, historical, mathematical, coding, or general-knowledge questions where external freshness is unlikely to add value. "
+            "Also appropriate after evaluating other options (recent context, skills, or searches) and determining that direct response is best. "
+            "Calling this ends the current tool-calling phase for the turn and delivers the complete answer."
         ),
         "parameters": {
             "type": "object",
@@ -285,8 +268,8 @@ def _code_execution_schema() -> dict:
             "Execute a snippet of Python code in an isolated, sandboxed Docker environment with tight limits on CPU, memory, runtime, and network. "
             "The code has access only to a very small set of safe stdlib modules (math, json, re, datetime, etc.) plus any explicitly allowed by the skill. "
             "No file system writes outside /tmp (ephemeral), no access to the bot's internal state or host. "
-            "Ideal for: cleaning/calculating data returned by other tools, simple parsing, math/stats, transforming lists/dicts, or running small deterministic scripts. "
-            "The skill's instructions must specify exactly what code patterns are allowed. "
+            "Well suited for cleaning/calculating/post-processing data returned by search or browser tools, simple parsing, math/stats, list/dict transforms, or executing small deterministic extraction/normalization scripts generated as part of a skill. "
+            "The containing skill's instructions must explicitly authorize the patterns used. "
             "Returns stdout, stderr, and any explicit return value or last expression."
         ),
         "parameters": {
@@ -321,9 +304,9 @@ def _playwright_browser_schema() -> dict:
         "description": (
             "Control a headless browser (Playwright) to visit pages, wait for JS, click, type, scroll, extract text/HTML/attributes, take screenshots, or perform other browser actions. "
             "Each call starts with a clean browser context (or a context provided by previous calls in the same skill activation if state is passed back). "
-            "Perfect for: sites with heavy JavaScript (Steam charts, dynamic leaderboards, SPAs), requiring login/cookies (if the skill securely manages them), complex selectors, or when you need to 'see' the rendered page. "
+            "Best when web_search is insufficient due to heavy JavaScript rendering, dynamic/SPA content, anti-scraper protections, need for login/cookie state (managed by the skill), complex DOM interactions, or visual verification via screenshot. "
             "Parameters are flexible: you can use natural language 'instructions' for common tasks or low-level actions. "
-            "Always respect robots.txt / terms in the skill logic. Rate limit yourself."
+            "Always respect robots.txt / terms in the skill logic. Rate limit yourself. For broad factual lookup, web_search is generally the lighter first choice."
         ),
         "parameters": {
             "type": "object",
@@ -338,7 +321,7 @@ def _playwright_browser_schema() -> dict:
                 },
                 "instructions": {
                     "type": "string",
-                    "description": "Natural language description of what to accomplish on the page (e.g. 'Go to the Steam page for Path of Exile 2 and extract the current players number and peaks'). The browser agent will interpret this."
+                    "description": "Natural language description of what to accomplish on the page (e.g. 'Go to the Steam page for Path of Exile 2 and extract the current players number and peaks'). The browser agent will interpret this. For broad information retrieval prefer web_search; use browser actions when rendering, interaction, or precise extraction from JS-heavy pages is required."
                 },
                 "selector": {
                     "type": "string",

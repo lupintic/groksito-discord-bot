@@ -196,16 +196,16 @@ def _generate_video_schema() -> dict:
         "type": "function",
         "name": "generate_video",
         "description": (
-            "Generate short video (grok-imagine-video). Auto 480p, max 6s. Limit 5 videos/day per user. "
-            "Use ONLY for explicit requests to generate/make/animate video (e.g. 'haz un video de esta', 'anima esta foto', 'crea video'). "
-            "NOT for generic questions about an image."
+            "Generate a short video clip (grok-imagine-video, auto 480p, max 6s, daily quota of 5 per user). "
+            "Supports text-to-video from a descriptive prompt or image-to-video animation from a reference image. "
+            "Appropriate for explicit user requests to create, generate, make, or animate video content from text or an attached/prior image."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "Scene or action for the video."
+                    "description": "Scene, action, or animation guidance for the video."
                 },
                 "duration": {
                     "type": "integer",
