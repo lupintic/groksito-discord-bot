@@ -544,17 +544,21 @@ def should_offer_light_decision_tools(
     is_reply_to_bot: bool = False,
     context_need: str = "normal",
 ) -> bool:
-    """Cheap pure predicate: offer light decision tools (respond_directly + get_recent_context) on addressed turns (plain @mentions/replies) unless ultra-casual or image_gen.
+    """Cheap pure predicate: offer light decision tools (respond_directly + get_recent_context) on plain addressed turns (plain @mentions/replies).
 
-    Heavy schemas (create/edit/use) remain gated on strong signals (creation_candidate etc) in llm.py.
-    Reuses is_addressed + context_need logic like should_generate_recent_summary; small to avoid cycles.
+    Broadened for #18: offered on addressed messages (normal and medium @mentions) so Grok can natively decide
+    via respond_directly vs get_recent_context (or combined with native search) instead of heavy Python pre-filters.
+    Only ultra-strict image_gen is excluded (no decision tools make sense). Casual addressed now also get the
+    light pair so the model can explicitly choose "direct" after considering options.
+    Context_need param kept for call-site compatibility but no longer gates light decision offering on addressed.
+    Heavy schemas (create/edit/use) remain gated on strong signals in llm.py.
     """
     if not text:
         return False
     is_addressed = bool(is_mentioned or is_reply_to_bot)
     if not is_addressed:
         return False
-    if context_need in ("casual", "image_gen"):
+    if context_need == "image_gen":
         return False
     return True
 

@@ -15,6 +15,7 @@ from groksito_discord.context import (
     classify_query_context_need,
     is_pure_image_generation_request,
     should_generate_recent_summary,
+    should_offer_light_decision_tools,
 )
 from groksito_discord.llm_utils import _detect_image_creation_intent
 from groksito_discord.conversation import (
@@ -159,6 +160,28 @@ class TestRecentSummaryGating:
         assert should_generate_recent_summary("explica el contexto anterior", is_mentioned=True, context_need="rich") is True
         # has_x on addressed
         assert should_generate_recent_summary("analiza esto", is_mentioned=True, has_x_link_intent=True) is True
+
+
+class TestLightDecisionToolsBroadeningForTicket18:
+    """#18: reduce pre-filtering that gates light decision tools on plain @mentions.
+
+    should_offer_light_decision_tools broadened (no longer gates on casual for addressed).
+    Combined with tools.py relaxation, this makes respond_directly + get_recent_context available
+    on more plain addressed messages (normal/medium @mentions) so Grok can natively decide
+    direct vs tool use. Classification outputs and other paths unchanged.
+    """
+
+    def test_should_offer_light_decision_tools_broadened_on_addressed(self):
+        # Plain addressed now offer light tools even for inputs that classify as casual or minimal
+        assert should_offer_light_decision_tools("hola groksito", is_mentioned=True) is True
+        assert should_offer_light_decision_tools("cuál es la capital?", is_reply_to_bot=True) is True
+        assert should_offer_light_decision_tools("qué es X", is_mentioned=True, context_need="minimal") is True
+        assert should_offer_light_decision_tools("hola", is_mentioned=True, context_need="casual") is True
+        # Non-addressed never offer (preserve laziness for unaddressed)
+        assert should_offer_light_decision_tools("hola", is_mentioned=False) is False
+        assert should_offer_light_decision_tools("qué es X", is_mentioned=False) is False
+        # Image gen addressed still excludes (safety/cost for pure gen)
+        assert should_offer_light_decision_tools("genera una imagen de un gato", is_mentioned=True, context_need="image_gen") is False
 
 
 # (search tests removed)

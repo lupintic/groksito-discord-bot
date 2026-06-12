@@ -536,7 +536,7 @@ def get_tools_for_request(
     # The base model just responds (with only referenced message injected on bot-replies).
     # reply_to_user is available on continuations (via previous_response_id) for direct delivery.
     # This is the key change for "feels like real Grok who happens to be named Groksito".
-    if query_need == "casual":
+    if query_need == "casual" and not offer_light_decision_tools and not offer_decision_tools:
         return []
 
     if query_need in ("minimal", "image_gen") and not has_visual_intent and not offer_light_decision_tools and not offer_decision_tools:

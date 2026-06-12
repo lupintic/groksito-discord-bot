@@ -125,18 +125,17 @@ def _create_skill_schema() -> dict:
 def _get_recent_context_schema() -> dict:
     """Schema for the model to explicitly request recent conversation summary via tool calling.
 
-    This is one of the core internal decision tools. Offered selectively on addressed or
-    context-heavy turns. The model calls it when it needs summarized prior chat for coherence
-    or to answer references to 'before', 'earlier', 'what did we say', etc.
+    This is one of the core internal decision tools (light set). Offered on plain addressed turns.
+    The model calls it when it needs summarized prior chat for coherence or to answer references.
     """
     return {
         "type": "function",
         "name": "get_recent_context",
         "description": (
-            "Fetch a compact, high-signal summary of the recent conversation history in this channel. "
-            "ONLY call get_recent_context when the user explicitly references prior turns ('qué dijimos antes', 'continúa de lo que hablábamos', 'what were we talking about earlier', 'de qué hablábamos', 'el tema anterior') or when coherence on recent addressed context is clearly needed. "
-            "Do NOT call for timeless or standalone questions — prefer respond_directly (or direct knowledge) instead. "
-            "The summary is generated on demand only when useful."
+            "ONLY call get_recent_context when the current user question explicitly or strongly references the recent conversation history in this channel and you need a compact summary to answer accurately or stay coherent. Strong signals: 'qué dijimos antes', 'continúa de lo que hablábamos', 'what were we talking about earlier', 'de qué hablábamos', 'el tema anterior', 'la charla de antes', or similar references to prior turns/messages. "
+            "Also appropriate for addressed follow-ups where the thread topic has shifted and raw history alone is insufficient. "
+            "Do NOT call for standalone, timeless, or general questions (definitions, 'qué es X', current events without chat reference) — prefer respond_directly (or direct knowledge + native search if fresh data needed) instead. "
+            "The summary is generated on demand only when useful; it is a targeted tool, not a default. After getting the summary, you will typically call respond_directly or another tool to finalize."
         ),
         "parameters": {
             "type": "object",
@@ -250,16 +249,19 @@ def _edit_skill_schema() -> dict:
 def _respond_directly_schema() -> dict:
     """Optional tool allowing the model to explicitly decide to answer directly.
 
-    Included in the decision tool set on complex turns. Lets the model cleanly signal after
+    Included in the decision tool set (light or full) on addressed turns. Lets the model cleanly signal after
     considering other tools (context, skills, searches) that it will now give the final response.
     """
     return {
         "type": "function",
         "name": "respond_directly",
         "description": (
-            "Call respond_directly (preferred default for most normal addressed turns) when the question is timeless, general knowledge, definitions, history, or matches direct criteria (no fresh/time-sensitive need). "
-            "Explicitly decide that you have all the information you need (from history, prior tool results, or built-in knowledge) and will now produce the final answer to the user without calling any more tools (including no search). "
-            "Only skip this for clear fresh-data cases that require web_search/x_search or get_recent_context on references. Aligns with: be direct on timeless topics, proactive only on recent/variable."
+            "PREFERRED DEFAULT for plain/normal addressed mentions and most timeless or general-knowledge questions. "
+            "Call respond_directly (and produce the final answer) when the query is definitional, historical, math, code, timeless facts, or you already have enough from built-in knowledge + any provided context/recent history to answer accurately without external tools. "
+            "Explicitly decide: 'I have everything needed right now' and output the complete user-facing reply with no further tool calls (no search, no get_recent_context). "
+            "Use this on typical @mentions like 'qué es X', 'cuánto es Y en general', explanations of known topics, or when search would not improve the answer. "
+            "Skip ONLY for clear fresh/time-sensitive needs (current prices, live events, 'qué pasó hoy', breaking news) that require web_search/x_search, or when the user references prior turns in this chat and get_recent_context is required for coherence. "
+            "Aligns with core directive: be direct on timeless; proactive on recent/variable. This keeps responses fast and low-token for everyday Discord questions."
         ),
         "parameters": {
             "type": "object",
