@@ -133,9 +133,12 @@ def _detect_image_creation_intent(text: str | None) -> bool:
 
 # =============================================================================
 # Activation guards (strict policy to avoid waking on random user-to-user replies)
-# Kept as minimal lists + predicates (not "heavy classification").
-# These were part of the conservative activation logic and are required for
-# correct behavior in conversation.py + client.py. Small and stable.
+# These are *minimal* and separate from the removed heavy classification tiering
+# (#22/#24). They implement the conservative "only wake on strong directed signals
+# when replying to another human" rule (never use broad GENERAL list for wake-up).
+# Re-added here (from working pre-placeholder tree) because conversation.py + client.py
+# (recovered for runnable state) depend on them. Kept small/auditable.
+# Post-cleanup they coexist with the light predicates below.
 # =============================================================================
 
 STRONG_DIRECTED_KEYWORDS = [
