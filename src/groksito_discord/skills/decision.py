@@ -1,18 +1,12 @@
 """
 Decision Layer (Light) for Groksito.
 
-#22 DEPRECATION NOTE:
-This module (the pre-decision heuristic + fast-path) is legacy "heavy custom decision
-logic" being progressively relaxed per the goal of relying on Grok native reasoning.
-The previous tiny LLM decision call was already removed; the remaining heuristic is
-kept ONLY for:
-  - extreme fast-path token savings on obvious timeless "direct" (skip search schemas)
-  - cheap signals for *when* to offer the light decision tools on addressed turns
-    (the real native choice mechanism now lives in the main tool-calling flow)
+Post #22/#24: This is the remaining lightweight heuristic layer (no more LLM decision call).
+Kept ONLY for fast-path token savings on obvious timeless "direct" cases and cheap signals
+for offering light decision tools on addressed turns. The primary native decisions now
+live in Grok's tool-calling flow (get_recent_context, respond_directly, native search etc).
 
-Long term these heuristics shrink further; normal mentions should let the model decide.
-
-(The DECISION_PROMPT below is retained for reference but no longer drives an LLM call.)
+DECISION_PROMPT retained for reference (not used for calls).
 """
 
 from __future__ import annotations
@@ -233,8 +227,7 @@ async def make_decision(
     # This is a deliberate simplification toward more natural, unified tool-calling decisions.
 
     # Always use the (now quite strong) heuristic.
-    # #22: this path itself is the reduced legacy pre-decider. Future passes will
-    # further shrink the keyword sets or remove the need entirely for most turns.
+    # Post #24: reduced legacy pre-decider kept only for the narrow fast-path cases.
     return _heuristic_decision(
         user_message=user_message,
         is_mentioned=is_mentioned,
@@ -351,8 +344,7 @@ def _heuristic_decision(
     has_timeless = any(k in t for k in timeless_starters)
 
     # --- Strong fresh / live / current-value signals (the only things that justify search) ---
-    # #22: trimmed a few marginal terms as part of reducing pre-decision keyword weight.
-    # Still sufficient for fast-path; model + native tools handle nuance.
+    # Post-cleanup: trimmed terms; sufficient for fast-path efficiency; model + native tools handle nuance.
     strong_fresh = (
         "hoy",
         "ahora",
@@ -425,4 +417,3 @@ def _heuristic_decision(
         propose_skill=None,
         rationale="heuristic-improved",
     )
-"

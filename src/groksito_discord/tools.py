@@ -635,7 +635,7 @@ def get_tools_for_request(
     if pure_image_gen:
         # Pure first-turn creation requests get an ultra-light custom tool set.
         # - Pure image: only the tiny generate_image schema.
-        # - Pure video (T2V, routed here via updated classify + detector): only the generate_video schema.
+        # - Pure video (T2V, routed here via pure image/video intent detector): only the generate_video schema.
         #   Avoids sending an irrelevant tiny image schema on "genera un video de..." style requests.
         tools: list[dict] = []
         is_explicit_video = ENABLE_VIDEO_GENERATION and has_explicit_video_intent

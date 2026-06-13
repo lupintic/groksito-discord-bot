@@ -1,22 +1,17 @@
 """
 Light intent predicates and helpers (centralized surface).
 
-Per #22 (Deprecate Heavy Custom Classification and Decision Heuristics):
-The previous elaborate keyword-driven classification system (large lists + complex
-rules to force "casual"/"minimal" tiers that suppressed native search/custom tools)
-is being progressively deprecated. Goal: rely on Grok's native reasoning and
-tool-calling judgment (augmented only by minimal Discord guardrails + strict
-safety/cost gates for media generation).
-
-This module now only hosts small, auditable, non-brittle predicates needed for:
+Post #22/#24: The heavy keyword-driven classification system and pre-decision
+heuristics have been removed (see classify_query_context_need removal and
+shim cleanup). We rely on Grok's native reasoning + tool-calling for decisions,
+with only minimal essential light predicates for:
 - pure first-turn image/video creation detection (ultra-light schemas + quota safety)
 - meta-conversation detection (for recent context)
-- decisions around offering light decision tools on addressed turns (lets model
-  choose reply/react/direct/get_context natively)
+- decisions around offering light decision tools on addressed turns
 - conservative summary trigger
+- light signals for visual result enrichment on search (no heavy lists)
 
-Heavy lists and pre-decision heuristics live only in legacy paths (being removed
-over time). No large tables here.
+All legacy heavy lists and classify paths cleaned. No large tables here.
 """
 
 from __future__ import annotations
@@ -90,12 +85,47 @@ def should_offer_light_decision_tools(
     return True
 
 
-# =============================================================================
-# Transitional shims for deprecated heavy lists (referenced by legacy classify paths)
-# Will be removed once classify_query_context_need and callers are fully cleaned (#22).
-# =============================================================================
+# (Transitional heavy list shims removed in #24 cleanup — classify paths fully excised.)
 
-_CASUAL_CHAT_HINTS: list[str] = ["hola", "hi", "hey", "jaja", "jeje", "lol", "xd", "buenas", "saludos", "gracias"]
-_SIMPLE_FACTUAL_HINTS: list[str] = ["qué es", "que es", "capital de", "quién es", "definición", "fórmula"]
-_COMPLEX_OR_PERSONAL_HINTS: list[str] = ["mi ", "yo ", "me ", "mis ", "recuerda", "acord", "personal"]
-_FRESH_OR_TOOL_HINTS: list[str] = ["hoy", "ahora", "precio", "última", "reciente", "breaking"]
+
+# =============================================================================
+# Light visual / image intent detectors (centralized, post-cleanup minimal versions)
+# =============================================================================
+# These replace the previous _detect_* heavy implementations. Used for:
+# - enriching native search results with images when query implies visual interest
+# - (image_creation one kept for compat re-exports even if lightly used now)
+# Kept deliberately small and non-brittle; creation gating uses the stricter
+# is_pure_image_generation_request.
+
+
+def _detect_visual_intent(text: str | None) -> bool:
+    """Light signal that the query may benefit from image-capable search results.
+
+    Examples: asking to "show pictures", "fotos de", "images of" something topical.
+    Not triggered by pure creation requests (those are handled by dedicated
+    is_pure + has_visual_intent paths for gen/edit tools).
+    """
+    if not text or len(text.strip()) < 4:
+        return False
+    t = text.lower()
+    positives = (
+        "imágenes", "imagenes", "fotos de", "pictures of", "photos of",
+        "muéstrame", "show me pictures", "show images", "fotos", "pictures",
+        "imágenes de", "fotos sobre", "drawings of", "ilustraciones",
+    )
+    if not any(p in t for p in positives):
+        return False
+    # Do not count as "visual search interest" if it's clearly a creation request
+    # (creation is routed via pure_image_gen + heavy tool gates instead).
+    neg = ("genera", "crea", "haz", "dibuja", "pinta", "edit", "sobre esta imagen")
+    if any(n in t for n in neg):
+        return False
+    return True
+
+
+def _detect_image_creation_intent(text: str | None) -> bool:
+    """Light detector for image creation intent (compat surface)."""
+    try:
+        return is_pure_image_generation_request(text)
+    except Exception:
+        return False

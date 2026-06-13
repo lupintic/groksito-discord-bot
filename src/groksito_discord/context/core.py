@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-import unicodedata
 from collections import defaultdict, deque
 from datetime import date, datetime
 from pathlib import Path
@@ -26,9 +25,9 @@ from ..correlation import cid_prefix
 
 from ..config import settings
 
-# Light intent predicates (post #22 deprecation of heavy classification).
-# Only the small essential helpers are imported; the large keyword lists and
-# complex tiering rules have been removed from the active classify path.
+# Light intent predicates (post #22/#24 cleanup of heavy classification).
+# Only the small essential helpers are imported. All heavy keyword lists,
+# tiering rules, and the classify_query_context_need function itself removed.
 from ..intents import (
     is_conversation_meta_question,
     is_pure_image_generation_request,
@@ -417,110 +416,10 @@ def get_messages_for_summarization(channel_id: int, keep_recent: int = 6) -> lis
 # (search subsystem removed)
 
 
-def _strip_accents(text: str) -> str:
-    if not text:
-        return ""
-    nfkd = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in nfkd if not unicodedata.combining(c))
-
-
-# =============================================================================
-# Query Complexity Classification (for smart tool offering) — DEPRECATED HEAVY PATH
-# =============================================================================
-# Per #22: heavy custom keyword classification + pre-decision heuristics are being
-# progressively deprecated. The long-term direction (see also #9) is to let Grok's
-# native reasoning + tool calling make almost all decisions, with only:
-#   - essential safety/cost gates (explicit video/audio intent in media_tools)
-#   - Discord-specific guardrails (addressed flags -> light decision tools)
-#   - tiny ultra-light special case for pure image gen (cost + schema correctness)
-#
-# This classify now returns "normal" for the vast majority of queries (including
-# normal mentions). This relaxes the previous aggressive demotion to casual/minimal
-# that was unnecessarily restricting native web_search / x_search tool access.
-# "minimal" tier is kept only for backward compat in a few tier checks; it is no
-# longer the common outcome for short factual questions.
-
-
-def _is_pure_image_gen_request_for_classification(text: str) -> bool:
-    """Preserved thin wrapper for the pure image_gen detection (essential special case)."""
-    if not text or len(text.strip()) < 5:
-        return False
-    try:
-        if is_pure_image_generation_request(text):
-            return True
-    except Exception:
-        pass
-    # Legacy T2V first-turn detection (kept narrow to avoid misclassifying analysis)
-    try:
-        t = _strip_accents(text.lower())
-        if "video" in t:
-            gen_hints = ("genera", "crea", "haz", "generame", "creame", "hazme", "quiero", "necesito", "make a", "generate a")
-            if any(g in t for g in gen_hints):
-                bad = ("esta ", "la imagen", "la foto", "referencia", "analiza")
-                if not any(b in t for b in bad):
-                    return True
-    except Exception:
-        pass
-    return False
-
-
-def classify_query_context_need(text: str, is_reply_continuation: bool = False) -> str:
-    """
-    Returns one of: "casual", "minimal", "normal", "rich", "image_gen".
-
-    #22 DEPRECATION IN PROGRESS:
-    Vastly simplified. Most turns (incl. normal @mentions) now classify "normal"
-    so that native search schemas and light decision tools are available and Grok
-    itself decides via its reasoning. Only the truly essential special cases remain.
-
-    Kept:
-    - image_gen for pure creation (cost control, correct tiny schema)
-    - rich for meta + long/personal (coherence)
-    - casual for pure short greetings (native chat feel, zero bloat)
-    - minimal only as rare fallback / compat
-
-    Removed: dozens of keyword rules, complex fresh/tool signal guards, word-count
-    demotion ladders, and the previous _CASUAL/_SIMPLE/_FRESH list driven paths.
-    """
-    if not text or len(text.strip()) < 4:
-        return "casual"
-
-    t = _strip_accents(text.lower())
-    word_count = len(t.split())
-
-    # Pure first-turn image/video gen -> special ultra-light tier (essential)
-    if not is_reply_continuation and _is_pure_image_gen_request_for_classification(text):
-        return "image_gen"
-
-    # Meta questions always rich (needs conversation state)
-    try:
-        if is_conversation_meta_question(text):
-            return "rich"
-    except Exception:
-        pass
-
-    # Personal depth or very long / step-by-step -> rich
-    has_personal = any(w in t for w in ("mi ", "yo ", "me ", "mis ", "mio", "mía", "recuerda", "acord"))
-    if has_personal or word_count > 22 or any(
-        k in t for k in ("explica detall", "analiza a fondo", "compara", "paso a paso", "cómo puedo")
-    ):
-        return "rich"
-
-    # Very short pure casual non-query chat on first turn (greetings/laughter only)
-    if not is_reply_continuation and word_count <= 4:
-        casual_hits = ("hola", "hi", "hey", "jaja", "jeje", "xd", "buenas", "saludos", "gracias", "ok")
-        has_command = any(q in t for q in ("?", "busca", "dime", "explica", "genera", "quiero", "haz", "crea"))
-        if any(c in t for c in casual_hits) and not has_command:
-            return "casual"
-
-    # On continuations never drop to casual/minimal
-    if is_reply_continuation:
-        return "normal"
-
-    # Default: normal for (almost) everything else.
-    # This is the key relaxation from #22 — normal mentions now get native tool
-    # access (search schemas) and the model decides instead of Python heuristics.
-    return "normal"
+# (_strip_accents, _is_pure..._for_classification and classify_query_context_need removed
+# in #24 final cleanup. The heavy classification tiering logic is gone; only the
+# light predicates from intents are used for the few remaining narrow cases.
+# context_need values still appear in a few logging/compat paths for continuity.)
 
 
 logger.info("✅ Context module loaded (buffers + per-user recent messages)")

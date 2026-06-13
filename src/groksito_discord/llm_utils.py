@@ -38,9 +38,10 @@ from .token_usage import (
     log_cache_metrics,
 )
 
-# Centralized intent detectors (Phase 5). Re-exported here so that all
-# existing imports `from .llm_utils import _detect_*` (in llm.py and
-# conversation.py) continue to work without any changes.
+# Centralized light intent detectors (post #24 cleanup of heavy versions).
+# Re-exported here for backward compat with any remaining imports in
+# llm.py / conversation.py / call sites. Light non-brittle implementations
+# live in intents.py.
 from .intents import (
     _detect_visual_intent,
     _detect_image_creation_intent,
@@ -133,8 +134,8 @@ def _build_native_search_tools(
       tool descriptions we provide) whether it actually needs fresh/current information or
       can answer from training knowledge.
     - The primary control for *whether any native search schema is sent at all* is context_need
-      (casual/minimal/image_gen -> zero; normal/rich -> consider). Upstream classify_query_context_need
-      + has_x_link_intent in llm_input also influence "normal" vs lower for borderline cases.
+      (casual/minimal/image_gen -> zero; normal/rich -> consider). Light predicates (post #24)
+      + has_x_link_intent determine tier for schema presence; the model decides actual usage.
       There are *no* heuristics that decide *whether the model should call* a search; only which
       schemas to declare (to avoid shipping heavy descriptions for irrelevant tools).
     - Strict laziness preserved: ZERO native search tools on "casual", "minimal", and "image_gen"
