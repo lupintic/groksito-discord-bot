@@ -514,6 +514,84 @@ def register_slash_commands(
                 ephemeral=True,
             )
 
+    # Context Menu: Read Aloud (message target)
+    # Reliable way to generate audio from any message: right-click → Apps → "Read Aloud"
+    # Reuses the full existing TTS pipeline (audio_handler + image_delivery for fancy voice bubble direct delivery).
+    # Guild whitelist + per-user rate limit enforced (consistent with /audio and all other commands).
+    # Keeps the /audio slash command exactly as-is (for manual text input).
+    @tree.context_menu(name="Read Aloud")
+    async def read_aloud_context_menu(interaction: discord.Interaction, message: discord.Message):
+        if interaction.guild and not is_guild_allowed(interaction.guild.id):
+            await interaction.response.send_message(
+                "Groksito no está disponible en este servidor.", ephemeral=True
+            )
+            return
+
+        # Rate limit (audio gen consumes resources like a conversational request)
+        rl = getattr(client, "rate_limiter", rate_limiter)
+        can_use, _ = rl.check(interaction.user.id)
+        if not can_use:
+            await interaction.response.send_message(
+                "Tranquilo campeón, ya usaste tus 6 requests este minuto.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Skip messages without text content
+        if not message.content or not message.content.strip():
+            await interaction.followup.send(
+                "Este mensaje no tiene texto para leer en voz alta.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            # Resolve voice/language from config (same defaults as /audio)
+            selected_voice = getattr(settings, "tts_default_voice", "eve") or "eve"
+            selected_lang = getattr(settings, "tts_default_language", "es") or "es"
+
+            # Register for direct delivery (fancy voice bubble) using the target message
+            request_id = None
+            try:
+                ch = getattr(interaction, "channel", None)
+                request_id = await register_image_request(
+                    user_id=interaction.user.id,
+                    channel_id=getattr(ch, "id", 0) or 0,
+                    message_id=getattr(message, "id", 0),
+                    operation_type="audio",
+                    original_message=message,
+                )
+            except Exception as reg_err:
+                logger.warning(f"[ReadAloudContext] Failed to register audio request: {reg_err}")
+
+            # Generate audio using the existing mature handler (full reuse, no duplication)
+            result = await _tool_generate_audio(
+                text=message.content,
+                voice=selected_voice,
+                language=selected_lang,
+                request_id=request_id,
+            )
+
+            # Ephemeral confirmation (the audio bubble itself is delivered publicly in channel)
+            if result and "SUCCESS" in result:
+                await interaction.followup.send(
+                    f"🎤 Audio generado del mensaje con la voz **{selected_voice}** (voice bubble).",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    result or "No se pudo generar el audio.",
+                    ephemeral=True,
+                )
+
+        except Exception as e:
+            logger.exception("Error in Context Menu 'Read Aloud'")
+            await interaction.followup.send(
+                f"Error generando el audio: {e}",
+                ephemeral=True,
+            )
+
 
 # =============================================================================
 # Steam integration moved to src/groksito_discord/integrations/steam.py (Phase 1)
