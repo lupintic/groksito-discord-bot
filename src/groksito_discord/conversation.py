@@ -474,6 +474,17 @@ async def _harvest_vision_images(
             except Exception as recent_vision_err:
                 logger.debug(f"{cid_p}[Vision] Recent channel image pull skipped: {recent_vision_err}")
 
+    # Filter transient X/Twitter preview images (pbs.twimg.com etc) that commonly 404
+    # when xAI vision backend fetches them. This fixes the #40 crash for mentions of
+    # x.com links containing images: we still surface the link text so model can (and will)
+    # use x_search for reliable post content. Good images (attachments, grok gens, stable hosts)
+    # are preserved for native vision.
+    raw_count = len(image_urls)
+    from .utils.text import filter_unreliable_vision_urls
+    image_urls = filter_unreliable_vision_urls(image_urls)
+    if len(image_urls) < raw_count:
+        logger.info(f"{cid_p}[Vision] Filtered {raw_count - len(image_urls)} unreliable X/Twitter image URL(s) (pbs.twimg.com previews from link embeds) to prevent 404 on vision; using text + x_search fallback")
+
     if image_urls:
         logger.info(f"{cid_p}[Vision] Total image URLs harvested for this turn: {len(image_urls)} (reply_continuation={is_reply_continuation}, mentioned={is_mentioned})")
 
