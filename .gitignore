@@ -106,6 +106,10 @@ scratch*.py
 *.bak
 *.orig
 
+# Tooling / agent scratch directories (Grok Build, implementers, etc.)
+# These often contain plans, summaries, and debug output that should never be committed.
+tmp/
+
 # -----------------------------------------------------------------------------
 # Testing, coverage, and quality tooling caches
 # -----------------------------------------------------------------------------
