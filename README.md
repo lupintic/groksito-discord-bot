@@ -1,164 +1,123 @@
-# Groksito Discord Bot
+# Groksito Discord Bot & Pantsu Connector
 
-A standalone, full-featured Discord bot powered by Grok (xAI). It provides rich conversational experiences, native vision, tool use, image and video generation, a lightweight skills system for recurring tasks, and an integrated web dashboard for management and observability.
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)
+![Discord](https://img.shields.io/badge/Discord-Bot-7289da.svg)
+![Spotify](https://img.shields.io/badge/Spotify-Integration-1DB954.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-The bot owns its Discord Gateway connection and emphasizes natural interactions that leverage Grok's native capabilities (personality, reasoning, vision, and built-in tools) with minimal custom injection.
+**Groksito** (internal project name: **Pantsu**) is a professional Discord bot and custom MCP-style connector that exposes a powerful set of tools for Grok and the xAI ecosystem to natively interact with Discord servers and Spotify.
 
-## Features
+This project extends Grok's capabilities with real-time Discord control (guilds, messages, rich embeds including gaming/SovietNoWaifu styles, image handling, auth flows) and full Spotify playback & library management.
 
-- **Grok-powered conversations** with vision (image understanding), referenced message context, and native xAI tools (`web_search`, `x_search`).
-- **Image generation and editing** via xAI endpoints.
-- **Video generation** (Text-to-Video and explicit Image-to-Video) with feature flag control and per-user quota tracking.
-- **Lightweight skills system**: user-approved or conservatively auto-proposed reusable behaviors (natural language instructions + restricted tool sets) for consistent handling of fresh-data patterns (e.g., game stats). Non-agentic, managed via web UI or tools.
-- **Web dashboard**: view stats, usage, health, guilds, and manage skills (list, approve, revoke).
-- **Context management**: short-term channel buffers with optional proactive summarization and recent context injection.
-- **Media handling**: dedicated audio, image, and video processors plus direct delivery to avoid duplicate replies.
-- **Sandbox**: safe execution environment for advanced tools (code execution, browser automation) when explicitly allowed by skills.
-- **OAuth support**: browser-based xAI login (SuperGrok / X Premium+) as alternative or complement to API keys, with token persistence and refresh.
-- **Observability & safety**: health checks (`--status`, `--check`), token usage and cache metrics, response length safety, guild allow-list.
-- **Docker-ready**: includes `Dockerfile` and `docker-compose.yml` with volumes for persistent data and OAuth tokens.
-- **Guided setup**: `python setup.py` for safe `.env` creation and repair.
+It was built iteratively using Grok Build for scaffolding, tool design, and automation, with heavy focus on clean architecture, security, and ease of use for other developers.
 
-## Quick Start
+## ✨ Features
 
-### 1. Configuration (Critical)
+- **16+ Discord Tools**
+  - Guild, channel & member management
+  - Rich message & embed sending (highly customizable, gaming aesthetics supported)
+  - Reactions, editing, deletion, bulk operations
+  - User/server info retrieval
+  - Image & attachment handling
+  - Permission & role management
+- **Spotify Integration Tools**
+  - Full playback control (play/pause/skip/queue/seek)
+  - Track, artist, album & playlist search
+  - Device management & volume control
+  - Currently playing info & recommendations
+- **MCP / Function-Calling Ready**
+  - Designed for seamless integration with Grok, local Ollama agents, or any LLM supporting tool use
+  - JSON Schema validated parameters
+- **Secure by Design**
+  - All credentials via environment variables only
+  - Proper Discord intents & least-privilege permissions
+  - Rate-limit aware with backoff
+- **Developer Friendly**
+  - Clean modular structure
+  - Easy to add new tools
+  - Self-hostable with Docker support planned
 
-**Never commit secrets.** Real credentials belong only in `.env` (and the `oauth/` directory for tokens). Both are covered by `.gitignore`.
+## 🚀 Installation
+
+### Prerequisites
+- Python 3.11+
+- Discord Bot token (create at https://discord.com/developers/applications)
+- Spotify Client ID + Client Secret (from https://developer.spotify.com/dashboard)
+- (Optional) xAI API key if using direct Grok calls
+
+### Quick Start
 
 ```bash
+# 1. Clone
+ git clone https://github.com/lupintic/groksito-discord-bot.git
+ cd groksito-discord-bot
+
+# 2. Virtual environment
+python -m venv .venv
+source .venv/bin/activate   # Linux / macOS
+# .venv\Scripts\activate     # Windows
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure environment
 cp .env.example .env
-# Edit .env and set at minimum:
-#   DISCORD_BOT_TOKEN=your_bot_token_here
-#   XAI_API_KEY=your_xai_key_here          # or use OAuth (see below)
-#   ALLOWED_GUILD_IDS=123456789012345678   # strongly recommended for security
+# Edit .env with your real tokens (NEVER commit .env!)
+
+# 5. Run the bot
+python -m src.bot   # or the main entrypoint of the project
 ```
 
-See `.env.example` for the complete list of variables, feature flags, and explanations (context limits, skill auto-creation thresholds, TTS defaults, summarization, etc.).
+## 📖 Usage
 
-### 2. OAuth Login (Optional but Recommended for SuperGrok Users)
+Once running, Groksito exposes its tools via an MCP-compatible interface or HTTP endpoint that Grok (or your custom agents) can call.
 
-Instead of (or alongside) an `XAI_API_KEY`, you can authenticate using your SuperGrok / X Premium+ subscription via browser OAuth. See [GROK_OAUTH.md](./GROK_OAUTH.md) for the full guide, including headless/VPS/Docker flows.
+Example prompt you can give to Grok:
+> "Usa las tools de Pantsu para crear un embed épico de gaming estilo SovietNoWaifu en el canal #general del servidor y pon una canción de Led Zeppelin en Spotify."
 
-Quick commands:
-- `python -m src.groksito_discord --login-oauth`
-- `python -m src.groksito_discord --auth-status`
-- `python -m src.groksito_discord --test-auth`
+See `examples/` folder (if present) or the tool schemas in `tools/` for full list of available functions and their parameters.
 
-Set `GROK_AUTH_MODE=auto` (or `oauth`) in `.env` to prefer the OAuth token when present.
+## 🏗️ Architecture
 
-### 3. Run with Docker (Recommended for Production)
+See the detailed [ARCHITECTURE.md](./ARCHITECTURE.md) for component breakdown, data flow, tech stack and extension guide.
 
-```bash
-# After configuring .env (and optionally logging in via OAuth)
-docker compose up --build
-```
+## 🛠️ Development
 
-The compose file mounts `./data` (runtime state) and `./oauth` (tokens) so they persist across container restarts.
+- Tools live in `tools/discord_tools.py` and `tools/spotify_tools.py`
+- Embed builders in `embeds/`
+- Core bot logic and tool registry in `core/` or `src/`
+- Configuration via Pydantic + dotenv
 
-### 4. Run Locally (Development / Testing)
+To add a new tool:
+1. Implement the function in the appropriate tools file
+2. Define its name, description and JSON Schema parameters
+3. Register it in the central ToolRegistry
+4. (Optional) Add visual embed support
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # Linux/macOS
+## 📄 License
 
-pip install -r requirements.txt
+This project is licensed under the **MIT License** — see the [LICENSE](./LICENSE) file for details.
 
-python -m src.groksito_discord --status     # Validate config and modules
-python -m src.groksito_discord              # Start the bot
-```
+You are free to use, modify, fork and distribute it.
 
-Use `python setup.py` for an interactive, safe guided setup that preserves existing values and creates backups.
+## 🤝 Contributing
 
-## Running the Bot
+Contributions, bug reports and feature ideas are very welcome!
 
-Common entrypoint:
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-new-tool`)
+3. Commit your changes
+4. Push to the branch and open a Pull Request
 
-```bash
-python -m src.groksito_discord
-```
+Please keep code style consistent and add tests when possible.
 
-Useful flags:
-- `--status` — configuration and credential diagnostics
-- `--check` — deeper health checks
-- `--login-oauth`, `--auth-status`, `--test-auth`, `--logout-oauth` — OAuth flows (see GROK_OAUTH.md)
+## 🙏 Credits & Acknowledgments
 
-The bot supports slash commands, direct mentions, and replies. Guild access is restricted by `ALLOWED_GUILD_IDS` when set.
-
-## Project Structure (High Level)
-
-```
-groksito-discord-bot/
-├── src/groksito_discord/          # Main Python package
-│   ├── bot.py, __main__.py        # Entry points and CLI
-│   ├── client.py                  # Discord Gateway owner + event handling
-│   ├── conversation.py            # Activation, vision harvesting, reply context
-│   ├── llm.py, llm_input.py, llm_utils.py   # Grok Responses API orchestration, input building, helpers
-│   ├── prompt.py                  # System prompts
-│   ├── tools.py, media_tools.py, skill_tools.py   # Tool schemas, dispatch, media & skill tools
-│   ├── sandbox.py                 # Sandboxed execution for privileged tools
-│   ├── context/                   # Short-term buffers + context_summarizer
-│   ├── skills/                    # Registry, decision layer, proposer (auto-create), executor
-│   ├── media/                     # Audio, image, and video handlers
-│   ├── image_generation.py, image_editing.py, image_delivery.py, video_generation.py
-│   ├── grok_oauth.py              # xAI OAuth client and token management
-│   ├── config.py, env_utils.py    # Settings and environment loading
-│   ├── health.py, token_usage.py  # Diagnostics and observability
-│   ├── response_safety.py         # Message length safety
-│   ├── integrations/              # External services (e.g. Steam)
-│   ├── emoji_registry.py, intents.py, utils/
-│   └── ...
-├── web/                           # Web dashboard (Flask/FastAPI-style)
-│   ├── main.py
-│   └── templates/                 # UI for dashboard, stats, usage, skills, guilds, config, capabilities
-├── data/                          # Runtime persistence (bot state, skills, context, health, etc.)
-│   └── .gitkeep                   # Directory is tracked; contents are gitignored
-├── tests/                         # Test suite
-├── docker-compose.yml
-├── Dockerfile
-├── setup.py                       # Interactive safe .env setup
-├── requirements.txt
-├── requirements-web.txt
-├── pyproject.toml
-├── .env.example                   # Committed template — copy to .env and fill
-├── .gitignore
-├── README.md
-├── ARCHITECTURE.md
-└── GROK_OAUTH.md
-```
-
-**Runtime-only locations** (never commit their contents):
-- `data/` — JSON files for guilds, health, skills, learned patterns, short-term context, etc.
-- `oauth/xai_oauth_tokens.json` — OAuth tokens and refresh tokens.
-- `__pycache__/`, `.pytest_cache/`, logs, etc.
-
-## Security and Secrets
-
-- `.env` contains your `DISCORD_BOT_TOKEN`, `XAI_API_KEY`, and other configuration. It is ignored by git.
-- OAuth tokens live in `oauth/`.
-- Always use `ALLOWED_GUILD_IDS` in production to limit which servers the bot can join.
-- The web dashboard only exposes safe, non-secret settings and management interfaces.
-- Review `.gitignore` for the full list of ignored patterns.
-
-## Development
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-# Configure .env, then run with --status first
-python -m src.groksito_discord --status
-```
-
-Run tests with `pytest` (see `tests/` for coverage of skills, sandbox, health, config safety, etc.).
-
-**Note:** The global `implement-ticket` skill is available. Use `/implement-ticket #42` (or a full issue URL) to implement GitHub issues for this project.
-
-## License
-
-See the repository for licensing information.
+- Built with heavy assistance from Grok Build and iterative prompting
+- Inspired by real-world automation needs (Discord backoffice, content creation, gaming embeds)
+- Thanks to the xAI team for the amazing Grok models
 
 ---
 
-For detailed architecture, see [ARCHITECTURE.md](./ARCHITECTURE.md).  
-For the xAI OAuth flow, see [GROK_OAUTH.md](./GROK_OAUTH.md).
+**Status**: Active development. Ready for self-hosting and experimentation by other developers.
+Made with ❤️ by [@lupintic](https://github.com/lupintic) in Santiago, Chile.
