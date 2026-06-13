@@ -129,3 +129,114 @@ def _detect_image_creation_intent(text: str | None) -> bool:
         return is_pure_image_generation_request(text)
     except Exception:
         return False
+
+
+# =============================================================================
+# Activation guards (strict policy to avoid waking on random user-to-user replies)
+# Kept as minimal lists + predicates (not "heavy classification").
+# These were part of the conservative activation logic and are required for
+# correct behavior in conversation.py + client.py. Small and stable.
+# =============================================================================
+
+STRONG_DIRECTED_KEYWORDS = [
+    # Targeted questions about the referenced content
+    "este tweet",
+    "este post",
+    "este link",
+    "este enlace",
+    "esta url",
+    "de qué habla",
+    "qué dice",
+    "qué es este",
+    "de qué va este",
+    "este x.com",
+    "este twitter",
+    "el tweet que",
+    "el post que",
+    "qué opina",
+    "analiza este",
+    "resumen de este",
+    "de qué trata este",
+    # Explicit addressing of the bot (common even without proper @mention)
+    "groksito",
+    "grok",
+    "@groksito",
+]
+
+# GENERAL_REPLY_INQUIRY_KEYWORDS: Broad set used *only* for context enrichment
+# and chain traversal *after* we have already decided to activate for a stronger reason.
+# These are intentionally permissive/common; must NEVER be sufficient by themselves
+# to wake the bot on a reply to another user.
+GENERAL_REPLY_INQUIRY_KEYWORDS = [
+    "esto",
+    "este mensaje",
+    "el mensaje",
+    "lo que",
+    "arriba",
+    "el anterior",
+    "la foto",
+    "la imagen",
+    "el post",
+    "el tweet",
+    "el link",
+    "qué es",
+    "de qué",
+    "qué dice",
+    "qué opinas",
+    "qué piensas",
+    "qué te parece",
+    "explica",
+    "analiza",
+    "resumen",
+    "sobre esto",
+    "de esto",
+    "esto de",
+    "la que",
+    "el que",
+    "lo anterior",
+]
+
+def _has_strong_directed_reply_intent(text: str | None) -> bool:
+    """Conservative: only strong targeted signals + bot name wake on replies to others."""
+    if not text:
+        return False
+    t = text.lower()
+    return any(kw in t for kw in STRONG_DIRECTED_KEYWORDS)
+
+
+def _has_recent_referent_intent(text: str | None) -> bool:
+    """
+    Detects likely reference to recent/recent-user content (for recent vision + referent
+    resolution on direct mentions, and for context enrichment once activated).
+    Broader than strong activation; safe because it does not control wake-up alone.
+    """
+    if not text:
+        return False
+    t = text.lower()
+    base = any(kw in t for kw in GENERAL_REPLY_INQUIRY_KEYWORDS)
+    referent = any(
+        kw in t
+        for kw in (
+            "el usuario",
+            "ese usuario",
+            "la imagen del usuario",
+            "la foto del usuario",
+            "el post del usuario",
+            "lo que dijo",
+            "lo que puso",
+            "el video de",
+            "la imagen de",
+            "el tweet de",
+            "arriba",
+            "el anterior",
+            "la anterior",
+            "de la foto",
+            "de la imagen",
+            "en la foto",
+            "en la imagen",
+            "ese link",
+            "ese enlace",
+            "esa url",
+        )
+    )
+    return base or referent
