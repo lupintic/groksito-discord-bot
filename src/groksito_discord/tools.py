@@ -143,6 +143,19 @@ async def execute_hybrid_tool(
     This is called from the LLM layer during tool use.
     """
     try:
+        # Lightweight structured logging of *actual model decisions* to invoke specific tools.
+        # Complements log_tool_selection (which logs schemas *offered*). See ticket #23.
+        # Gated by same flag; only logs keys (no arg values) for privacy/low overhead.
+        try:
+            from ..config import settings
+            if getattr(settings, "log_tool_selection", True):
+                arg_keys = sorted(args.keys()) if isinstance(args, dict) else []
+                tools_logger.info(
+                    f"{cid_prefix()}[TOOLS] decision | tool={name} | arg_keys={arg_keys}"
+                )
+        except Exception:
+            pass
+
         if name == "get_channel_context":
             limit = int(args.get("limit", 8))
             return context.get_channel_context(
@@ -479,7 +492,8 @@ def log_tool_selection(
     enable_image_understanding: bool = False,
 ) -> None:
     """
-    Structured logging for tool schema decisions.
+    Structured logging for tool *schema* decisions (what we offer the model).
+    Complements runtime decision logs in execute_hybrid_tool + [DECISION] in skill handlers (see #23).
     Called from llm.py after we finalize what tools to send.
     """
     try:
