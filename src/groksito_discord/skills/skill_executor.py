@@ -75,8 +75,10 @@ def prepare_skill_injection(
     block = (
         f"[SKILL ACTIVE: {skill.name}]\n"
         f"{instructions}\n"
-        f"Only use the tools explicitly allowed for this skill. Stay focused on the skill's purpose. "
-        f"Be concise and follow the skill instructions exactly."
+        f"Focus on the skill using its allowed tools. Core Groksito features (text replies via reply_to_user, "
+        f"Grok Imagine image generation when the user asks to 'genera una imagen' / 'me generas un...', "
+        f"react, threads) are always available and should be used when the user request calls for them. "
+        f"Be concise and follow the skill instructions exactly for the skill's domain."
     )
 
     # Partition allowed_tools into native vs custom (extensible)
@@ -173,16 +175,44 @@ def filter_custom_tools(
     Restrict custom tools to the intersection of what the skill allows and
     what was going to be offered anyway.
 
-    For the base implementation most skills will only use native web/x.
-    This function keeps the door open for future narrow custom tools per skill
-    (e.g. a "get_steam_players" tool that a Steam skill could request).
+    IMPORTANT: Core Discord delivery (reply_to_user etc) + Grok Imagine media tools
+    (generate_image, edit_image, generate_audio...) are *always* kept even if the
+    active skill did not explicitly list them. These are fundamental bot capabilities
+    (direct replies, native image generation via the custom tool) and must not be
+    disabled by a narrow skill like "Steam player counts". This ensures Grok can
+    natively reason to call generate_image on image requests ("me generas un gato...")
+    regardless of any active skill.
+
+    Skill-specific power tools (code_execution, playwright, custom domain tools) remain
+    strictly gated by the skill's allowed_custom list.
     """
     if not injection or not injection.allowed_custom:
         # No custom restrictions from the skill — return as planned
         return custom_tools
 
     allowed = injection.allowed_custom
-    return [t for t in custom_tools if t.get("name") in allowed]
+
+    # Core tools that are part of Groksito's base identity and must survive skill filtering.
+    # This is what enables "Grok natively reasons to use Grok Imagine" even when a
+    # data-lookup skill is active.
+    CORE_ALWAYS_ALLOWED = {
+        "reply_to_user",
+        "react_to_message",
+        "create_thread",
+        "generate_image",
+        "edit_image",
+        "generate_audio",
+        "generate_video",  # if the skill flow somehow reached here with video intent
+    }
+
+    filtered = [t for t in custom_tools if t.get("name") in allowed]
+    # Re-add any core tools that were offered in this turn (they take precedence over skill narrowness).
+    for t in custom_tools:
+        name = t.get("name")
+        if name in CORE_ALWAYS_ALLOWED and name not in {tt.get("name") for tt in filtered}:
+            filtered.append(t)
+
+    return filtered
 
 
 def should_use_recent_context_from_decision(

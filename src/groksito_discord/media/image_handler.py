@@ -444,7 +444,7 @@ async def _tool_generate_image(
         for attempt in range(max_attempts):
             async with httpx.AsyncClient(timeout=settings.api_timeout_seconds) as http_client:
                 generation_payload = {
-                    "model": extra_params.get("model", "grok-imagine-image"),
+                    "model": extra_params.get("model", "grok-imagine-image-quality"),
                     "prompt": current_prompt,
                     "n": min(count, 4),
                     "response_format": "url",

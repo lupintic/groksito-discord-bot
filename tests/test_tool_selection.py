@@ -63,8 +63,10 @@ class TestFirstTurnLaziness:
             pure_image_gen=True,
         )
         names = _tool_names(tools)
-        assert "generate_image" in names
-        assert "generate_video" in names  # only because explicit + enabled
+        # Pure video intent + pure_image_gen path deliberately offers *only* the video schema
+        # (avoids irrelevant generate_image on "haz un video de..." requests).
+        assert "generate_video" in names
+        assert "generate_image" not in names
         assert "edit_image" not in names
 
 
@@ -170,12 +172,17 @@ class TestLightDecisionOffer:
         assert "create_thread" in names
         assert "respond_directly" in names
         assert "get_recent_context" in names
-        # no heavy bloat
+        # Image gen/edit now offered on light addressed turns so Grok can natively reason to
+        # invoke Grok Imagine (generate_image) on any phrasing without client heuristics as gate.
+        # (Tiny schema; full heavy only on explicit has_visual pre-detect or pure mode.)
+        assert "generate_image" in names
+        assert "edit_image" in names
+        # no skill creation bloat
         assert "create_skill" not in names
         assert "edit_skill" not in names
         assert "use_skill" not in names
-        # 5 delivery + decision tools expected under light path (was 2 before #21)
-        assert len(names) <= 5
+        # 5 delivery/decision + 2 image tools
+        assert len(names) <= 7
 
     def test_full_decision_still_offers_heavy(self, patch_video_enabled):
         patch_video_enabled(True)

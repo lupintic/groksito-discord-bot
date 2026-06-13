@@ -134,9 +134,11 @@ async def call_grok_for_groksito(
         # Compute pure image gen intent *early* so we can pass it to the input builder for the dedicated "image_gen" mode.
         pure_image_gen_intent = False
         try:
+            # Pure image gen intent is driven by the (light) is_pure detector for the ultra-minimal
+            # image_gen context+tools path. Do NOT AND with _detect_visual_intent (that detector
+            # explicitly returns False on creation verbs to avoid misrouting "show pictures" search cases).
             pure_image_gen_intent = (
-                _detect_visual_intent(user_message)
-                and is_pure_image_generation_request(user_message)
+                is_pure_image_generation_request(user_message)
                 and not bool(image_urls)
                 and not is_reply_continuation
             )

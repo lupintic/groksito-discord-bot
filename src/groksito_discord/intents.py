@@ -23,16 +23,34 @@ from typing import Any
 # =============================================================================
 
 def is_pure_image_generation_request(text: str | None) -> bool:
-    """Strong signals for first-turn pure text-to-image (not edit, not analysis, not video)."""
+    """Strong signals for first-turn pure text-to-image (not edit, not analysis, not video).
+    This is used only for the ultra-light "image_gen" optimization path (zero context + tiny tool only).
+    Tool availability for native reasoning is no longer gated exclusively behind this (see light decision tools).
+    """
     if not text or len(text.strip()) < 5:
         return False
     t = text.lower()
-    # Tight positive signals only
+    # Cover common natural Spanish + English phrasings for "generate an image of..."
+    # Includes casual "me generas un gato con botas?", "hazme un [subject]", etc.
+    # The word "imagen" is not required if the verb is a clear creation verb and no analysis/edit/video signals.
+    # This detector is *only* for the ultra-light pure image_gen optimization path.
+    # Tool availability for native reasoning is guaranteed via light decision tools + core tool protection.
     positives = (
         "genera una imagen", "generame una imagen", "genera imagen de",
-        "haz una imagen", "hazme una imagen", "crea una imagen", "creame una imagen",
-        "dibuja un", "dibujame", "pinta una", "una imagen de un", "imagen de una",
+        "me generas una imagen", "me generás una imagen", "me genera una imagen",
+        "generame una imagen de", "genera una de",
+        "haz una imagen", "hazme una imagen", "hazme una imagen de",
+        "crea una imagen", "creame una imagen", "crea una imagen de",
+        "quiero una imagen", "quiero una imagen de", "quiero que generes una",
+        "dibuja un", "dibujame", "dibújame", "dibuja una imagen", "dibuja me una",
+        "pinta una", "pintame", "píntame",
+        "una imagen de un", "imagen de una", "imagen de el", "imagen de la",
+        # Bare creation-verb + subject (very common casual): "me generas un gato con botas", "genera un gato..."
+        "me generas un", "me generás un", "me genera un",
+        "generame un", "hazme un", "creame un", "dibujame un", "pintame un",
+        "genera un", "haz un", "crea un", "dibuja un", "pinta un",
         "generate an image of", "draw a picture of", "make an image", "create a picture",
+        "generate me an image", "make me an image of", "draw me",
         "genera una foto de", "haz un dibujo",
     )
     if not any(p in t for p in positives):
@@ -41,6 +59,7 @@ def is_pure_image_generation_request(text: str | None) -> bool:
     negatives = (
         "esta ", "la imagen", "la foto", "referencia", "edit", "edita", "sobre esta",
         "de esta", "analiza", "describe", "qué ves", "video", "anim",
+        "de la imagen", "de la foto", "de esta imagen", "sobre la imagen",
     )
     if any(n in t for n in negatives):
         return False
