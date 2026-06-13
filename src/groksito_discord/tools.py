@@ -708,6 +708,13 @@ def get_tools_for_request(
             tools.append(_get_create_thread_schema_light())
         except Exception:
             pass
+        # Include image gen/edit on full decision turns too (consistent with light path) for native Grok Imagine choice.
+        if not has_visual_intent:
+            try:
+                tools.append(_generate_image_schema_tiny())
+                tools.append(_edit_image_schema())
+            except Exception:
+                pass
     elif offer_light_decision_tools:
         # Light decision only (plain addressed normal/minimal): core delivery actions (reply/react/thread)
         # plus the decision signals (get_recent + respond_directly). Heavy skill tools (create/edit/use) stay behind strong signals.
@@ -720,5 +727,19 @@ def get_tools_for_request(
             tools.append(_respond_directly_schema())
         except Exception:
             pass
+
+        # Offer image generation (tiny schema) + edit on addressed turns so Grok can *natively*
+        # reason about whether to call grok-imagine (generate_image) for any natural phrasing
+        # ("me generas una imagen...", "draw the cat in a suit...", etc). This removes the previous
+        # hard client-side heuristic gate (has_visual_intent / is_pure only) for tool *availability*.
+        # The model decides via its tool-calling reasoning + the tool description. Pure ultra-light
+        # path (when detector catches) still offers only the action tool with zero extra context.
+        # Video/audio remain explicitly gated (quota-sensitive).
+        if not has_visual_intent:
+            try:
+                tools.append(_generate_image_schema_tiny())
+                tools.append(_edit_image_schema())
+            except Exception:
+                pass
 
     return tools
