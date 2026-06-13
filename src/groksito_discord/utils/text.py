@@ -117,3 +117,36 @@ def extract_image_urls_from_text(text: str) -> list[str]:
                     others.append(url)
 
     return prioritized + others
+
+
+def filter_unreliable_vision_urls(urls: list[str]) -> list[str]:
+    """Filter out image URLs from known transient/unreliable CDNs (e.g. X/Twitter pbs.twimg.com previews).
+
+    These frequently cause 404 when the xAI Responses API backend attempts to fetch them for vision,
+    especially for recent tweets, multi-image posts, or certain regions/accounts. Discord embed
+    thumbnails for x.com links are the common source when harvesting vision for "que piensas de esto"
+    style mentions.
+
+    Skipping them allows graceful degradation: the x.com URL remains visible in the user text,
+    has_x_link_intent / text signals cause x_search to be offered, and x_search can surface
+    post content and media info reliably from server side (no client fetch of the CDN url).
+
+    This keeps good (stable) image URLs like direct Discord attachments, grok-generated, or
+    user-hosted images working for native vision.
+    """
+    if not urls:
+        return []
+
+    unsafe_domains = ("pbs.twimg.com", "video.twimg.com")
+    safe: list[str] = []
+    for u in urls:
+        if not u:
+            continue
+        try:
+            if any(d in u.lower() for d in unsafe_domains):
+                continue
+            safe.append(u)
+        except Exception:
+            # be permissive on weird data
+            safe.append(u)
+    return safe

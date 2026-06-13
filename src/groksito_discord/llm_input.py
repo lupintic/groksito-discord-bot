@@ -48,6 +48,9 @@ def _classify_query_context_need(text: str, is_reply_continuation: bool = False)
     return "normal"
 from .token_usage import log_context_injection
 
+# Centralized vision URL safety filter (prevents X/Twitter pbs.twimg.com 404s on Responses vision; see #40)
+from .utils.text import filter_unreliable_vision_urls
+
 
 class ResponsesInputData(TypedDict):
     """Lightweight structural type for the return value of build_responses_input.
@@ -88,11 +91,18 @@ def _build_multimodal_user_content(
     if not image_urls:
         return user_message or ""
 
+    # Last-mile safety filter: drop any unreliable hosts that slipped through harvest
+    # (e.g. pbs.twimg.com from X link embed thumbnails). Prevents 404 fetch errors in
+    # the Responses API and allows the request to proceed with text (or other good images).
+    safe_urls = filter_unreliable_vision_urls(image_urls)
+    if not safe_urls:
+        return user_message or ""
+
     content: list[dict] = []
     text = (user_message or "").strip()
     content.append({"type": "input_text", "text": text})
 
-    for url in image_urls[:3]:
+    for url in safe_urls[:3]:
         content.append({
             "type": "input_image",
             "image_url": url,
