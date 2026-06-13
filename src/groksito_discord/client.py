@@ -514,6 +514,90 @@ def register_slash_commands(
                 ephemeral=True,
             )
 
+    # =============================================================================
+    # Message Context Menu: "🔊 Leer en voz alta" (Read Aloud)
+    # =============================================================================
+    # Right-click any message > Apps > "🔊 Leer en voz alta".
+    # Quick way to TTS the message content using the configured default voice/language.
+    # Reuses the exact same audio pipeline as /audio (text prep, xAI TTS, waveform bubble,
+    # direct delivery via image_delivery sentinel, rate limiting, guild whitelist).
+    # This restores the dedicated "context menu read aloud" UX (no reply + slash needed).
+    @tree.context_menu(name="🔊 Leer en voz alta")
+    async def read_aloud_context(
+        interaction: discord.Interaction,
+        message: discord.Message,
+    ):
+        # Guild whitelist (identical to every other command)
+        if interaction.guild and not is_guild_allowed(interaction.guild.id):
+            await interaction.response.send_message(
+                "Groksito no está disponible en este servidor.", ephemeral=True
+            )
+            return
+
+        # Rate limit (audio is a resource-consuming action, same bucket as chat requests)
+        rl = getattr(client, "rate_limiter", rate_limiter)
+        can_use, _ = rl.check(interaction.user.id)
+        if not can_use:
+            await interaction.response.send_message(
+                "Tranquilo campeón, ya usaste tus 6 requests este minuto.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Extract text directly from the right-clicked target message.
+        # (For pure image/attachment messages without text we gracefully error;
+        # the conversational LLM + vision path can describe images instead.)
+        final_text = (getattr(message, "content", "") or "").strip()
+        if not final_text:
+            await interaction.followup.send(
+                "El mensaje no contiene texto para leer en voz alta. "
+                "Responde al mensaje con /audio o menciona a Groksito para analizar imágenes.",
+                ephemeral=True,
+            )
+            return
+
+        # Always use the configured defaults (context menus don't support parameter choices
+        # in the initial click; user can follow up with /audio + voice if they want a different one).
+        selected_voice = getattr(settings, "tts_default_voice", "eve") or "eve"
+        selected_lang = getattr(settings, "tts_default_language", "es") or "es"
+
+        # Register for direct delivery (same as /audio slash so the voice bubble is sent
+        # publicly by the tool without a duplicate reply from the command handler).
+        request_id = None
+        try:
+            ch = getattr(interaction, "channel", None)
+            request_id = await register_image_request(
+                user_id=interaction.user.id,
+                channel_id=getattr(ch, "id", 0) or 0,
+                message_id=getattr(message, "id", 0) or getattr(interaction, "id", 0),
+                operation_type="audio",
+                original_message=message,  # target message gives correct channel for delivery
+            )
+        except Exception as reg_err:
+            logger.warning(f"[ReadAloudContext] Failed to register audio request: {reg_err}")
+
+        # Core generation + delivery (identical reuse as the slash and the generate_audio tool)
+        result = await _tool_generate_audio(
+            text=final_text,
+            voice=selected_voice,
+            language=selected_lang,
+            request_id=request_id,
+        )
+
+        # Ephemeral confirmation to the invoker (the actual audio is delivered publicly
+        # to the channel by the shared audio handler / direct-delivery logic).
+        if result and "SUCCESS" in str(result).upper():
+            await interaction.followup.send(
+                f"✅ Audio generado con la voz **{selected_voice}** y enviado al canal.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                result or "No se pudo generar el audio.",
+                ephemeral=True,
+            )
+
 
 # =============================================================================
 # Steam integration moved to src/groksito_discord/integrations/steam.py (Phase 1)

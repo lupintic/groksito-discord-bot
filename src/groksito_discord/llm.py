@@ -422,7 +422,62 @@ async def call_grok_for_groksito(
                 extra_body={"prompt_cache_key": cache_key},
             )
         except Exception as api_err:
-            if image_urls:
+            err_str = str(api_err)
+            err_lower = err_str.lower()
+            is_image_fetch_404 = bool(image_urls) and (
+                "fetching image failed" in err_lower
+                or ("404" in err_lower and ("image" in err_lower or "not found" in err_lower))
+                or "unrecoverable data loss" in err_lower  # the wrapper message from xAI for bad image fetches
+            )
+            if is_image_fetch_404:
+                logger.warning(
+                    f"{cid_p}[LLM][VISION] Image fetch 404 from xAI backend for {len(image_urls)} provided URL(s). "
+                    f"These were likely stale Discord signed attachment URLs or transient embed previews from recent channel history. "
+                    f"Retrying first turn WITHOUT images so the response can still succeed using text + tools (e.g. x_search for X links)."
+                )
+                try:
+                    # Rebuild a text-only input (the llm_input builder + its internal filter will produce plain text content).
+                    plain_input_data = await build_responses_input(
+                        user_message=user_message,
+                        channel_id=channel_id,
+                        original_message=original_message,
+                        image_urls=[],
+                        referenced_context=referenced_context,
+                        reply_chain_contexts=reply_chain_contexts,
+                        is_reply_continuation=is_reply_continuation,
+                        has_x_link_intent=has_x_link_intent,
+                        image_gen_intent=pure_image_gen_intent,
+                        is_reply_to_bot=is_reply_to_bot,
+                        is_mentioned=is_mentioned,
+                    )
+                    plain_initial_input = plain_input_data["initial_input"]
+                    response = await _call_responses_with_retry(
+                        client,
+                        model=model,
+                        input=plain_initial_input,
+                        tools=[
+                            *native_search_tools,
+                            *custom_tools,
+                        ],
+                        extra_body={"prompt_cache_key": cache_key},
+                    )
+                    # Success on retry: clear the image flag so downstream logging/metrics treat this as non-vision.
+                    image_urls = []
+                    logger.info(f"{cid_p}[LLM][VISION] First-turn retry without images succeeded after fetch failure.")
+                except Exception as retry_err:
+                    logger.error(f"{cid_p}[LLM][VISION] Retry without images also failed: {retry_err}")
+                    # Fall through to original hard error path below (will produce the "describe the image" user message).
+                    if image_urls:
+                        logger.error(
+                            f"{cid_p}[LLM][VISION] Responses API call FAILED while sending {len(image_urls)} image(s). "
+                            f"Model={model}. Error: {api_err}"
+                        )
+                        raise RuntimeError(
+                            f"Vision request to xAI Responses API failed (likely payload format or 4xx). "
+                            f"Images: {len(image_urls)}. Original error: {api_err}"
+                        ) from api_err
+                    raise
+            elif image_urls:
                 logger.error(
                     f"{cid_p}[LLM][VISION] Responses API call FAILED while sending {len(image_urls)} image(s). "
                     f"Model={model}. Error: {api_err}"
@@ -431,7 +486,8 @@ async def call_grok_for_groksito(
                     f"Vision request to xAI Responses API failed (likely payload format or 4xx). "
                     f"Images: {len(image_urls)}. Original error: {api_err}"
                 ) from api_err
-            raise
+            else:
+                raise
 
         # Capture first-turn prompt tokens for addressed metrics (minimal extraction, reuse patterns from _extract)
         first_turn_prompt_tokens = 0
