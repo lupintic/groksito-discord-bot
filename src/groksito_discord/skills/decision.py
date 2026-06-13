@@ -1,26 +1,18 @@
 """
 Decision Layer (Light) for Groksito.
 
-Runs a tiny, stable, prompt-cache-friendly call *before* the main response
-to decide the high-level strategy for the turn:
+#22 DEPRECATION NOTE:
+This module (the pre-decision heuristic + fast-path) is legacy "heavy custom decision
+logic" being progressively relaxed per the goal of relying on Grok native reasoning.
+The previous tiny LLM decision call was already removed; the remaining heuristic is
+kept ONLY for:
+  - extreme fast-path token savings on obvious timeless "direct" (skip search schemas)
+  - cheap signals for *when* to offer the light decision tools on addressed turns
+    (the real native choice mechanism now lives in the main tool-calling flow)
 
-- Can answer directly from knowledge? (preferred for timeless topics)
-- Needs recent conversation context?
-- Needs to search (web_search vs x_search) — only for truly fresh/time-sensitive data?
-- Should use an existing approved skill?
+Long term these heuristics shrink further; normal mentions should let the model decide.
 
-The decision prompt is deliberately small, fixed and example-rich for excellent
-xAI prompt caching and high decision quality.
-
-Output is always a compact JSON object. No prose.
-
-This is a cheap classification step (not a full agent). It is used to:
-- Inject recent context only when useful
-- Activate skills when they match
-- **Avoid sending expensive web_search/x_search tool schemas** when the answer is clearly "direct" (major token win)
-- Let the main Responses call + Grok's own judgment handle the rest.
-
-Heuristic fallback is kept strong so we can often skip the tiny decision LLM call.
+(The DECISION_PROMPT below is retained for reference but no longer drives an LLM call.)
 """
 
 from __future__ import annotations
@@ -241,6 +233,8 @@ async def make_decision(
     # This is a deliberate simplification toward more natural, unified tool-calling decisions.
 
     # Always use the (now quite strong) heuristic.
+    # #22: this path itself is the reduced legacy pre-decider. Future passes will
+    # further shrink the keyword sets or remove the need entirely for most turns.
     return _heuristic_decision(
         user_message=user_message,
         is_mentioned=is_mentioned,
@@ -357,11 +351,12 @@ def _heuristic_decision(
     has_timeless = any(k in t for k in timeless_starters)
 
     # --- Strong fresh / live / current-value signals (the only things that justify search) ---
+    # #22: trimmed a few marginal terms as part of reducing pre-decision keyword weight.
+    # Still sufficient for fast-path; model + native tools handle nuance.
     strong_fresh = (
         "hoy",
         "ahora",
         "actual",
-        "en este momento",
         "en vivo",
         "live",
         "breaking",
@@ -369,29 +364,18 @@ def _heuristic_decision(
         "dólar blue",
         "cotización",
         "clima hoy",
-        "resultado hoy",
         "pico jugadores",
-        "jugadores ahora",
         "steam chart",
         "steam charts",
         "player count",
-        "player counts",
-        "concurrent player",
         "jugadores steam",
         "pico de jugadores",
         "cuántos jugadores",
-        "cuantos jugadores",
-        "steam player",
-        "charts player",
-        "player count steam",
         "latest",
         "reciente",
         "controvers",
         "polémica",
         "problemas",
-        "issues",
-        "drama",
-        "scandal",
         "qué pasó",
         "what happened",
         "recent",
@@ -441,3 +425,4 @@ def _heuristic_decision(
         propose_skill=None,
         rationale="heuristic-improved",
     )
+"

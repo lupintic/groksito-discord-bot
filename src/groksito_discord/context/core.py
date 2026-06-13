@@ -26,13 +26,10 @@ from ..correlation import cid_prefix
 
 from ..config import settings
 
-# Centralized intent/keyword data (Phase 5). Re-exports keep the public API
-# of this module stable for all existing call sites.
+# Light intent predicates (post #22 deprecation of heavy classification).
+# Only the small essential helpers are imported; the large keyword lists and
+# complex tiering rules have been removed from the active classify path.
 from ..intents import (
-    _SIMPLE_FACTUAL_HINTS,
-    _CASUAL_CHAT_HINTS,
-    _COMPLEX_OR_PERSONAL_HINTS,
-    _FRESH_OR_TOOL_HINTS,
     is_conversation_meta_question,
     is_pure_image_generation_request,
     should_generate_recent_summary,
@@ -428,254 +425,102 @@ def _strip_accents(text: str) -> str:
 
 
 # =============================================================================
-# Query Complexity Classification (for smart tool offering)
+# Query Complexity Classification (for smart tool offering) — DEPRECATED HEAVY PATH
 # =============================================================================
-# Used by LLM layer to decide mode (casual/minimal/normal/rich/image_gen).
-# This controls:
-# - custom tool schemas (zero for casual/minimal unless visual)
-# - native web_search / x_search offering (only for normal/rich)
+# Per #22: heavy custom keyword classification + pre-decision heuristics are being
+# progressively deprecated. The long-term direction (see also #9) is to let Grok's
+# native reasoning + tool calling make almost all decisions, with only:
+#   - essential safety/cost gates (explicit video/audio intent in media_tools)
+#   - Discord-specific guardrails (addressed flags -> light decision tools)
+#   - tiny ultra-light special case for pure image gen (cost + schema correctness)
 #
-# Context injection is completely decoupled and minimal (see llm_input.py).
-# We trust classify + the is_reply_to_bot flag for keeping things light.
-# Timeless simple factual -> minimal.
-
-# Keyword lists are now centralized in intents.py (Phase 5).
-# They are imported at the top of this file for the classify logic and
-# the Phase-4-extracted helpers.
+# This classify now returns "normal" for the vast majority of queries (including
+# normal mentions). This relaxes the previous aggressive demotion to casual/minimal
+# that was unnecessarily restricting native web_search / x_search tool access.
+# "minimal" tier is kept only for backward compat in a few tier checks; it is no
+# longer the common outcome for short factual questions.
 
 
 def _is_pure_image_gen_request_for_classification(text: str) -> bool:
-    """Mechanical extraction of the pure first-turn image_gen / T2V detection logic.
-
-    This helper preserves the exact rules used to force the ultra-light "image_gen"
-    classification tier (zero custom tools, no native search, minimal context).
-    It must never return True for edit/analysis/reference cases.
-    """
+    """Preserved thin wrapper for the pure image_gen detection (essential special case)."""
     if not text or len(text.strip()) < 5:
         return False
-
-    t = _strip_accents(text.lower())
-
-    # Pure text-to-image
     try:
         if is_pure_image_generation_request(text):
             return True
     except Exception:
         pass
-
-    # Pure standalone text-to-video (T2V)
+    # Legacy T2V first-turn detection (kept narrow to avoid misclassifying analysis)
     try:
+        t = _strip_accents(text.lower())
         if "video" in t:
-            gen_hints = (
-                "genera",
-                "crea",
-                "haz",
-                "generame",
-                "creame",
-                "hazme",
-                "quiero",
-                "necesito",
-                "make a",
-                "generate a",
-            )
+            gen_hints = ("genera", "crea", "haz", "generame", "creame", "hazme", "quiero", "necesito", "make a", "generate a")
             if any(g in t for g in gen_hints):
-                if (
-                    "esta " not in t
-                    and "la imagen" not in t
-                    and "la foto" not in t
-                    and "referencia" not in t
-                    and "analiza" not in t
-                ):
+                bad = ("esta ", "la imagen", "la foto", "referencia", "analiza")
+                if not any(b in t for b in bad):
                     return True
     except Exception:
         pass
-
     return False
-
-
-def _is_pure_casual_chat(t: str, word_count: int, is_reply_continuation: bool) -> bool:
-    """Mechanical extraction of casual chat detection.
-
-    Preserves the rule that only very short, non-personal, non-command greetings
-    and laughter on first-turn should be treated as "casual" (zero tools, zero context).
-    """
-    if is_reply_continuation:
-        return False
-    casual_hit = any(h in t for h in _CASUAL_CHAT_HINTS)
-    has_question_or_command = any(
-        w in t
-        for w in (
-            "?",
-            "busca",
-            "dime",
-            "explica",
-            "analiza",
-            "genera",
-            "haz",
-            "crea",
-            "quiero",
-            "noticia",
-            "noticias",
-            "hoy",
-            "ayer",
-            "precio",
-            "pasó",
-            "ocurrió",
-            "latest",
-            "reciente",
-            "controvers",
-            "qué pasó",
-        )
-    )
-    has_personal_deep = any(
-        w in t for w in ("mi ", "yo ", "me ", "mis ", "mio", "mía", "recuerda", "acord")
-    )
-    return (
-        casual_hit
-        and not has_question_or_command
-        and not has_personal_deep
-        and word_count <= 6
-    )
-
-
-def _has_fresh_or_tool_signal(t: str) -> bool:
-    """Mechanical extraction of the 'needs fresh data or tool' signal used in final fallback.
-
-    Preserves the exact (iteratively tightened) list that keeps queries with recency,
-    prices, sports, or clear X signals at "normal" instead of demoting to minimal/casual.
-    Broadened via central _FRESH_OR_TOOL_HINTS (intents.py) for medium topical like controversies/latest.
-    """
-    base = (
-        "busca",
-        "genera",
-        "haz",
-        "crea",
-        "quiero que",
-        "puedes",
-        "noticia",
-        "noticias",
-        "hoy",
-        "ayer",
-        "anoche",
-        "reciente",
-        "precio",
-        "dolar",
-        "cotizacion",
-        "partido",
-        "paso",
-        "pasó",
-        "ocurrio",
-        "breaking",
-        "news",
-        "en vivo",
-        "tweet",
-        "tweets",
-        "x.com",
-        "trending",
-        "este tweet",
-        "el tweet",
-        "post en x",
-        "en tendencia",
-    )
-    return any(k in t for k in base) or any(k in t for k in _FRESH_OR_TOOL_HINTS)
 
 
 def classify_query_context_need(text: str, is_reply_continuation: bool = False) -> str:
     """
-    Returns one of: "casual", "minimal", "normal", "rich", "image_gen"
+    Returns one of: "casual", "minimal", "normal", "rich", "image_gen".
 
-    This classifies the *need level* which drives tool offering:
-    - casual/minimal/image_gen -> ZERO custom tools (and no native web/x search)
-    - normal/rich -> native web/x_search may be offered (see llm.py + _build_native_search_tools);
-      x_search only on clear signals (stricter to save tokens); custom tools only for visual.
+    #22 DEPRECATION IN PROGRESS:
+    Vastly simplified. Most turns (incl. normal @mentions) now classify "normal"
+    so that native search schemas and light decision tools are available and Grok
+    itself decides via its reasoning. Only the truly essential special cases remain.
 
-    "rich" is still produced for complex/personal/meta/long queries (for logging / future use),
-    but no longer causes extra context injection (only [R:] ref on bot replies).
+    Kept:
+    - image_gen for pure creation (cost control, correct tiny schema)
+    - rich for meta + long/personal (coherence)
+    - casual for pure short greetings (native chat feel, zero bloat)
+    - minimal only as rare fallback / compat
 
-    If is_reply_continuation=True, we avoid "casual"/"minimal" to keep multi-turn coherent.
+    Removed: dozens of keyword rules, complex fresh/tool signal guards, word-count
+    demotion ladders, and the previous _CASUAL/_SIMPLE/_FRESH list driven paths.
     """
     if not text or len(text.strip()) < 4:
-        return "casual"  # very short is casual chat
+        return "casual"
 
     t = _strip_accents(text.lower())
     word_count = len(t.split())
 
-    # Pure casual chat detection (greetings, laughter, short slang, acknowledgments)
-    # These almost never need tools or rich context on first turn.
-    if _is_pure_casual_chat(t, word_count, is_reply_continuation):
-        return "casual"
-
-    # Meta questions (already have dedicated detector) always want rich context
-    if is_conversation_meta_question(text):
-        return "rich"
-
-    # Dedicated "image_gen" ultra-light mode (even lighter than "minimal").
-    # Pure first-turn text-to-image (and text-to-video) requests get almost zero context
-    # and the appropriate minimal custom tool schema(s).
-    if not is_reply_continuation and _is_pure_image_gen_request_for_classification(
-        text
-    ):
+    # Pure first-turn image/video gen -> special ultra-light tier (essential)
+    if not is_reply_continuation and _is_pure_image_gen_request_for_classification(text):
         return "image_gen"
 
-    # Strong personal or continuation signals -> rich
-    for hint in _COMPLEX_OR_PERSONAL_HINTS:
-        if hint in t:
+    # Meta questions always rich (needs conversation state)
+    try:
+        if is_conversation_meta_question(text):
             return "rich"
+    except Exception:
+        pass
 
-    # Very short + direct question word or lookup verb -> minimal
-    if word_count <= 7:
-        for hint in _SIMPLE_FACTUAL_HINTS:
-            if hint in t and not _has_fresh_or_tool_signal(t):
-                return "minimal"
-        # Pure short questions without personal pronouns often minimal
-        if (
-            any(
-                w in t
-                for w in ("?", "es", "son", "cuál", "cual", "qué", "que", "quién")
-            )
-            and "mi " not in t
-            and "yo " not in t
-        ):
-            if word_count <= 5 and not _has_fresh_or_tool_signal(t):
-                # guard with fresh signal (adjusted) so recency/controversy phrasing like "latest ..." don't falsely demote due to substring matches (e.g. "es" in "latest")
-                return "minimal"
-
-    # Long queries or containing "explica", "analiza", "compara" etc. lean rich
-    if word_count > 18 or any(
-        k in t
-        for k in (
-            "explica",
-            "analiza",
-            "compara",
-            "detall",
-            "paso a paso",
-            "cómo puedo",
-            "como puedo",
-        )
+    # Personal depth or very long / step-by-step -> rich
+    has_personal = any(w in t for w in ("mi ", "yo ", "me ", "mis ", "mio", "mía", "recuerda", "acord"))
+    if has_personal or word_count > 22 or any(
+        k in t for k in ("explica detall", "analiza a fondo", "compara", "paso a paso", "cómo puedo")
     ):
         return "rich"
 
-    result = "normal"
+    # Very short pure casual non-query chat on first turn (greetings/laughter only)
+    if not is_reply_continuation and word_count <= 4:
+        casual_hits = ("hola", "hi", "hey", "jaja", "jeje", "xd", "buenas", "saludos", "gracias", "ok")
+        has_command = any(q in t for q in ("?", "busca", "dime", "explica", "genera", "quiero", "haz", "crea"))
+        if any(c in t for c in casual_hits) and not has_command:
+            return "casual"
 
-    # Never use "casual" or "minimal" on replies/continuations
+    # On continuations never drop to casual/minimal
     if is_reply_continuation:
-        if result in ("casual", "minimal"):
-            result = "normal"
+        return "normal"
 
-    # Final fallback for first-turn short non-personal chat (in case it didn't hit the early check).
-    # We use an expanded "has_fresh_or_tool_signal" so that queries with recency/news/price/sports
-    # *or clear X/Twitter signals* (iteratively tightened) stay at "normal" (to get native search
-    # tools offered, including the stricter x_search) instead of demoting queries that genuinely
-    # benefit from search schemas. Broad non-X phrases no longer force normal unnecessarily.
-    # Timeless queries without such signals get demoted (to minimal/casual) to avoid sending
-    # unnecessary native tool schemas (~250+ tokens) on turns that don't need search.
-    if not is_reply_continuation and result == "normal":
-        has_personal = any(w in t for w in ("mi ", "yo ", "me ", "mis ", "mio", "mía"))
-        if word_count <= 5 and not has_personal and not _has_fresh_or_tool_signal(t):
-            # wc<=5 (tightened from <=7) to preserve info-seeking phrasing (e.g. recency/controversy queries) at normal tier for search offering
-            result = "minimal"
-
-    return result
+    # Default: normal for (almost) everything else.
+    # This is the key relaxation from #22 — normal mentions now get native tool
+    # access (search schemas) and the model decides instead of Python heuristics.
+    return "normal"
 
 
 logger.info("✅ Context module loaded (buffers + per-user recent messages)")
