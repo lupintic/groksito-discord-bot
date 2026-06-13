@@ -472,14 +472,22 @@ async def _tool_generate_audio(
                                     voice_sent = False
                                     send_method = "none"
 
-                                    if handle_message_parameters is not None:
+                                    channel = getattr(orig_msg, "channel", None)
+                                    is_interaction = isinstance(orig_msg, discord.Interaction)
+
+                                    if handle_message_parameters is not None and channel is not None:
                                         try:
-                                            message_reference: dict[str, str] = {
-                                                "message_id": str(orig_msg.id),
-                                                "channel_id": str(orig_msg.channel.id),
-                                            }
-                                            if getattr(orig_msg, "guild", None) and orig_msg.guild is not None:
-                                                message_reference["guild_id"] = str(orig_msg.guild.id)
+                                            message_reference: dict[str, str] | None = None
+                                            ch_id = getattr(channel, "id", None)
+                                            if not is_interaction and ch_id:
+                                                # Only real messages get a reply reference (threads the voice bubble under request).
+                                                # For slash /audio (Interaction), we send top-level in channel (appears after command use).
+                                                message_reference = {
+                                                    "message_id": str(getattr(orig_msg, "id", "")),
+                                                    "channel_id": str(ch_id),
+                                                }
+                                                if getattr(orig_msg, "guild", None) and orig_msg.guild is not None:
+                                                    message_reference["guild_id"] = str(orig_msg.guild.id)
 
                                             am = AllowedMentions(replied_user=False) if AllowedMentions else None
 
@@ -497,8 +505,8 @@ async def _tool_generate_audio(
                                                 allowed_mentions=am,
                                             )
 
-                                            await orig_msg._state.http.send_message(
-                                                channel_id=orig_msg.channel.id,
+                                            await channel._state.http.send_message(
+                                                channel_id=ch_id,
                                                 params=params,
                                             )
                                             voice_sent = True
@@ -506,10 +514,10 @@ async def _tool_generate_audio(
                                         except Exception as low_err:
                                             logger.warning(
                                                 f"{cid_prefix()}[AudioDelivery] Low-level voice message send failed: {low_err}. "
-                                                "Falling back to high-level without flags."
+                                                "Falling back to channel send."
                                             )
 
-                                    if not voice_sent:
+                                    if not voice_sent and channel is not None:
                                         try:
                                             # Re-create File for fallback (previous may have been read/consumed)
                                             f2 = _VoiceMessageFile(
@@ -518,16 +526,14 @@ async def _tool_generate_audio(
                                                 duration=duration,
                                                 waveform=waveform,
                                             )
-                                            await orig_msg.reply(
-                                                delivery_text,
-                                                mention_author=False,
-                                                file=f2,
-                                            )
+                                            # Interaction (slash) or message: public channel.send so voice appears in channel.
+                                            # (lowlevel path already handled reply-ref for real messages when possible)
+                                            await channel.send(file=f2)
                                             voice_sent = True
-                                            send_method = "highlevel-no-flags"
+                                            send_method = "channel-send" if is_interaction else "highlevel-no-flags"
                                         except Exception as fb_err:
                                             logger.warning(
-                                                f"{cid_prefix()}[AudioDelivery] High-level fallback send also failed: {fb_err}"
+                                                f"{cid_prefix()}[AudioDelivery] Channel send fallback also failed: {fb_err}"
                                             )
 
                                     if voice_sent:
@@ -539,7 +545,10 @@ async def _tool_generate_audio(
                                     else:
                                         # Last resort: send the text so the user knows something happened.
                                         try:
-                                            await orig_msg.reply(delivery_text, mention_author=False)
+                                            if channel:
+                                                await channel.send(delivery_text)
+                                            else:
+                                                await orig_msg.reply(delivery_text, mention_author=False)
                                         except Exception:
                                             pass
                                         logger.warning(
@@ -549,11 +558,19 @@ async def _tool_generate_audio(
                                     # Absolute last resort only if we couldn't produce OGG at all.
                                     bio = BytesIO(audio_bytes)
                                     bio.name = "audio.mp3"
-                                    await orig_msg.reply(
-                                        delivery_text,
-                                        mention_author=False,
-                                        file=discord.File(bio, filename="audio.mp3")
-                                    )
+                                    channel = getattr(orig_msg, "channel", None)
+                                    is_interaction = isinstance(orig_msg, discord.Interaction)
+                                    if channel and (is_interaction or not hasattr(orig_msg, "reply")):
+                                        await channel.send(
+                                            delivery_text,
+                                            file=discord.File(bio, filename="audio.mp3")
+                                        )
+                                    else:
+                                        await orig_msg.reply(
+                                            delivery_text,
+                                            mention_author=False,
+                                            file=discord.File(bio, filename="audio.mp3")
+                                        )
                                     logger.info(f"{cid_prefix()}[AudioDelivery] Sent as audio.mp3 (no OGG conversion available)")
                                     audio_attached = True
 
@@ -587,7 +604,11 @@ async def _tool_generate_audio(
                                 # Try one last time with just the text (no file) so the user at least gets
                                 # a reply instead of total silence on the audio request.
                                 try:
-                                    await orig_msg.reply(delivery_text, mention_author=False)
+                                    channel = getattr(orig_msg, "channel", None)
+                                    if channel and isinstance(orig_msg, discord.Interaction):
+                                        await channel.send(delivery_text)
+                                    else:
+                                        await orig_msg.reply(delivery_text, mention_author=False)
                                 except Exception:
                                     pass
                                 # fall through to fallback return below
@@ -664,3 +685,45 @@ async def _handle_generate_audio(args: dict, original_message: Any) -> str:
         request_id=request_id,
         **{k: v for k, v in args.items() if k not in ("prompt", "text", "voice", "language", "speed")}
     )
+
+
+# =============================================================================
+# Slash Command Support (reuses 100% of core TTS + delivery logic)
+# =============================================================================
+
+async def prepare_text_from_interaction(
+    interaction: discord.Interaction, provided_text: str = ""
+) -> str:
+    """
+    Build final text for the /audio slash command, with reply-to-message support.
+
+    - If no provided_text and the invocation carries a message reference (user
+      replied to a message then ran the slash), fetch and use the replied content.
+    - If both text and reply: combine naturally as "<text> [reading the message] <replied>".
+    - Returns stripped text (core _prepare_text_for_tts will still clean markdown/tags
+      and enforce length).
+    - Never raises; falls back gracefully so slash stays robust.
+    """
+    final_text = (provided_text or "").strip()
+
+    replied_message = None
+    try:
+        msg_ref = None
+        if getattr(interaction, "message", None) and getattr(interaction.message, "reference", None):
+            msg_ref = interaction.message.reference
+        if msg_ref and getattr(msg_ref, "message_id", None):
+            ch = getattr(interaction, "channel", None)
+            if ch and hasattr(ch, "fetch_message"):
+                replied_message = await ch.fetch_message(msg_ref.message_id)
+    except Exception:
+        replied_message = None
+
+    if replied_message and getattr(replied_message, "content", None):
+        replied_content = (replied_message.content or "").strip()
+        if replied_content:
+            if not final_text:
+                final_text = replied_content
+            else:
+                final_text = f"{final_text} [reading the message] {replied_content}"
+
+    return final_text
