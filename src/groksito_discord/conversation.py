@@ -11,6 +11,7 @@ Key responsibilities:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from .correlation import cid_prefix
@@ -41,6 +42,13 @@ from .intents import (
 )
 
 logger = logging.getLogger("groksito.conversation")
+
+# Max age (seconds) for auto-including images from the recent channel history for vision
+# on direct @mentions with referent language ("arriba", "esto", "la imagen", etc.).
+# Only very fresh images have reliably-valid Discord signed attachment URLs (or fresh embed previews).
+# Older ones are skipped for native vision to avoid 404s when the xAI backend fetches;
+# the message text + get_recent_context tool (when offered) + user description remain available.
+_RECENT_VISION_MAX_AGE_SECONDS: int = 15 * 60  # 15 minutes is conservative for "recent visual referent"
 
 # URL / link extraction helpers were moved to src/groksito_discord/utils/text.py
 # (Phase 2 centralization). They are re-exported above via aliases so the rest
@@ -459,14 +467,43 @@ async def _harvest_vision_images(
                     from .context import get_recent_channel_messages
                     recent_msgs = get_recent_channel_messages(ch, limit=8)
                     added = 0
+                    now = time.time()
                     for m in reversed(recent_msgs):  # most recent first
-                        for u in (m.get("image_urls") or []):
-                            if u and u not in image_urls:
-                                image_urls.append(u)
-                                added += 1
-                                logger.debug(f"{cid_p}[Vision] Recent channel image from mention reference: {u[:70]}...")
-                            if added >= 2:
-                                break
+                        msg_ts = m.get("ts") or 0
+                        age_ok = (now - msg_ts) <= _RECENT_VISION_MAX_AGE_SECONDS if msg_ts else False
+
+                        # Prefer stored image_urls (from attachments or prior embed capture).
+                        # These are the risky ones: Discord cdn attachment URLs are signed and expire;
+                        # embed previews (even after our filter) can also go 404. Only use if the source
+                        # message is very recent.
+                        if age_ok:
+                            for u in (m.get("image_urls") or []):
+                                if u and u not in image_urls:
+                                    image_urls.append(u)
+                                    added += 1
+                                    logger.debug(f"{cid_p}[Vision] Recent channel image from mention reference: {u[:70]}...")
+                                if added >= 2:
+                                    break
+                        else:
+                            if (m.get("image_urls") or []) and msg_ts:
+                                logger.debug(f"{cid_p}[Vision] Skipped stale image(s) from recent msg (age >15m) to avoid 404 on xAI vision fetch")
+
+                        if added >= 2:
+                            break
+
+                        # Also extract original image URLs from the recent message *text content*.
+                        # These are usually stable publisher URLs (imgur etc.) the user literally pasted,
+                        # not Discord-signed ones. Apply the age gate too for safety/consistency, but
+                        # they are lower risk.
+                        if added < 2 and age_ok:
+                            content = m.get("content") or ""
+                            for u in _extract_image_urls_from_text(content):
+                                if u and u not in image_urls:
+                                    image_urls.append(u)
+                                    added += 1
+                                    logger.debug(f"{cid_p}[Vision] Recent channel image (text-extracted original) from mention reference: {u[:70]}...")
+                                if added >= 2:
+                                    break
                         if added >= 2:
                             break
                     if added:
@@ -474,16 +511,17 @@ async def _harvest_vision_images(
             except Exception as recent_vision_err:
                 logger.debug(f"{cid_p}[Vision] Recent channel image pull skipped: {recent_vision_err}")
 
-    # Filter transient X/Twitter preview images (pbs.twimg.com etc) that commonly 404
-    # when xAI vision backend fetches them. This fixes the #40 crash for mentions of
-    # x.com links containing images: we still surface the link text so model can (and will)
-    # use x_search for reliable post content. Good images (attachments, grok gens, stable hosts)
+    # Filter transient/unreliable preview images (pbs.twimg.com, Discord external link proxies etc)
+    # that commonly 404 (or fail header/region checks) when xAI vision backend fetches them.
+    # This protects "que piensas de esto [x.com link]" and similar referent cases (direct mention or reply):
+    # we still surface the link text + has_x_link_intent so the model can (and will) use x_search
+    # (or web_search) for reliable post content + media. Good images (attachments, grok gens, stable user image links)
     # are preserved for native vision.
     raw_count = len(image_urls)
     from .utils.text import filter_unreliable_vision_urls
     image_urls = filter_unreliable_vision_urls(image_urls)
     if len(image_urls) < raw_count:
-        logger.info(f"{cid_p}[Vision] Filtered {raw_count - len(image_urls)} unreliable X/Twitter image URL(s) (pbs.twimg.com previews from link embeds) to prevent 404 on vision; using text + x_search fallback")
+        logger.info(f"{cid_p}[Vision] Filtered {raw_count - len(image_urls)} unreliable image URL(s) (X/Twitter previews or Discord link-embed proxies) to prevent 404 on vision; using text + x_search fallback")
 
     if image_urls:
         logger.info(f"{cid_p}[Vision] Total image URLs harvested for this turn: {len(image_urls)} (reply_continuation={is_reply_continuation}, mentioned={is_mentioned})")

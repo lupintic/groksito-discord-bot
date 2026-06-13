@@ -120,30 +120,39 @@ def extract_image_urls_from_text(text: str) -> list[str]:
 
 
 def filter_unreliable_vision_urls(urls: list[str]) -> list[str]:
-    """Filter out image URLs from known transient/unreliable CDNs (e.g. X/Twitter pbs.twimg.com previews).
+    """Filter out image URLs from known transient/unreliable CDNs and proxies (e.g. X/Twitter pbs.twimg.com previews, Discord link embed proxies).
 
-    These frequently cause 404 when the xAI Responses API backend attempts to fetch them for vision,
-    especially for recent tweets, multi-image posts, or certain regions/accounts. Discord embed
-    thumbnails for x.com links are the common source when harvesting vision for "que piensas de esto"
-    style mentions.
+    These frequently cause 404 (or header/region/proxy issues) when the xAI Responses API backend attempts to fetch them for vision,
+    especially for recent tweets, multi-image posts, X link cards, or certain regions/accounts. Discord embed
+    thumbnails for x.com links (and other external link previews) are the common source when harvesting vision for "que piensas de esto"
+    style mentions (direct or via recent referent on @mention).
 
-    Skipping them allows graceful degradation: the x.com URL remains visible in the user text,
-    has_x_link_intent / text signals cause x_search to be offered, and x_search can surface
-    post content and media info reliably from server side (no client fetch of the CDN url).
+    The filter runs in harvest + as last-mile in input builder.
 
-    This keeps good (stable) image URLs like direct Discord attachments, grok-generated, or
-    user-hosted images working for native vision.
+    Skipping them allows graceful degradation: the x.com (or other link) URL remains visible in the user text,
+    has_x_link_intent / text signals cause x_search (or web_search) to be offered, and the native tools can surface
+    post content and media info reliably from server side (no client fetch of the CDN/proxy url).
+
+    This keeps good (stable) image URLs like direct Discord attachments (cdn.discordapp.com/attachments), grok-generated, or
+    user-hosted original image links (e.g. imgur, unsplash, or bare .jpg in text) working for native vision.
     """
     if not urls:
         return []
 
     unsafe_domains = ("pbs.twimg.com", "video.twimg.com")
+    # Discord external *link preview* proxies (for tweets, YT cards, web links etc). These are transient,
+    # often header-sensitive or short-lived when fetched server-to-server by vision backends.
+    # Do NOT match real user attachments: cdn.discordapp.com/attachments/... are stable and desired.
+    discord_proxy_markers = ("images-ext", "discordapp.net/external")
     safe: list[str] = []
     for u in urls:
         if not u:
             continue
         try:
-            if any(d in u.lower() for d in unsafe_domains):
+            ul = u.lower()
+            if any(d in ul for d in unsafe_domains):
+                continue
+            if any(m in ul for m in discord_proxy_markers) or "/external/" in ul:
                 continue
             safe.append(u)
         except Exception:

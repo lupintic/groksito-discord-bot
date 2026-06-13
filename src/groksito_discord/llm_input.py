@@ -92,8 +92,10 @@ def _build_multimodal_user_content(
         return user_message or ""
 
     # Last-mile safety filter: drop any unreliable hosts that slipped through harvest
-    # (e.g. pbs.twimg.com from X link embed thumbnails). Prevents 404 fetch errors in
-    # the Responses API and allows the request to proceed with text (or other good images).
+    # (e.g. pbs.twimg.com / Discord external proxies from X link or web embed thumbnails).
+    # Prevents 404 fetch errors in the Responses API and allows the request to proceed with text
+    # (or other good images). The x.com link in the text + has_x_link_intent will steer the model
+    # to x_search for accurate content.
     safe_urls = filter_unreliable_vision_urls(image_urls)
     if not safe_urls:
         return user_message or ""
