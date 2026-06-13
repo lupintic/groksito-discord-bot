@@ -618,6 +618,7 @@ async def handle_create_skill(args: dict[str, Any], original_message: Any = None
 async def handle_get_recent_context(args: dict[str, Any], original_message: Any = None) -> str:
     """Handler for the get_recent_context meta tool."""
     try:
+        logger.info(f"{cid_prefix()}[DECISION] model chose get_recent_context (explicit tool decision to fetch recent context)")
         ch = getattr(original_message, "channel", None)
         ch_id = getattr(ch, "id", 0) if ch else 0
         from .context.context_summarizer import summarize_recent_conversation
@@ -632,6 +633,7 @@ async def handle_get_recent_context(args: dict[str, Any], original_message: Any 
 async def handle_use_skill(args: dict[str, Any], original_message: Any = None) -> str:
     """Handler for the use_skill meta tool."""
     try:
+        logger.info(f"{cid_prefix()}[DECISION] model chose use_skill (delegating to approved skill)")
         from .skills.skill_registry import get_skill_registry
         reg = get_skill_registry()
         ident = str(args.get("skill", "") or args.get("skill_name", "") or args.get("skill_id", "")).strip()
@@ -756,4 +758,5 @@ async def handle_edit_skill(args: dict[str, Any], original_message: Any = None) 
 
 async def handle_respond_directly(args: dict[str, Any], original_message: Any = None) -> str:
     """Handler for the respond_directly meta tool."""
+    logger.info(f"{cid_prefix()}[DECISION] model chose respond_directly (explicit signal: ready for final answer, no more tools)")
     return "DECISION: respond directly. I now have enough information to formulate the final answer to the user without further tool calls or actions."

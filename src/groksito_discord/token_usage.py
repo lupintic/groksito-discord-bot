@@ -311,15 +311,22 @@ def log_addressed_turn_metrics(
     model_chose_search: bool = False,
     model_chose_direct: bool = False,
     query_need: str = "unknown",
-    **_: Any,  # tolerate future fields
+    # Extended signals for #23 (tool decision observability on addressed turns). Callers (llm.py)
+    # can pass these; safe defaults for backward compat with existing call sites.
+    model_chose_recent_context: bool = False,
+    model_chose_respond_directly: bool = False,
+    media_tools_used: bool = False,
+    custom_tools_used: list[str] | None = None,
+    **_: Any,
 ) -> None:
-    """Lightweight addressed-turn instrumentation (Ticket #7 Phase 1).
+    """Lightweight addressed-turn instrumentation (Ticket #7 Phase 1 + #23 observability).
 
     Structured [ADDRESSED] logs + append to small in-mem _recent_addressed deque.
-    (No p95 yet; logs enable before/after comparison of tokens/latency/choice on normal mentions.)
-    Called only on addressed turns from llm.py. Reuses existing token patterns + cid.
+    Captures key signals about Grok's tool choices (search, direct, recent context, media, delivery).
+    Low overhead. Logs enable analysis of when/why model picks specific tools.
     """
     try:
+        tools_str = ",".join(custom_tools_used) if custom_tools_used else ""
         entry = {
             "ts": time.time(),
             "latency_ms": round(float(latency_ms), 1),
@@ -328,6 +335,10 @@ def log_addressed_turn_metrics(
             "chose_search": bool(model_chose_search),
             "chose_direct": bool(model_chose_direct),
             "need": query_need or "unknown",
+            "chose_recent": bool(model_chose_recent_context),
+            "chose_respond": bool(model_chose_respond_directly),
+            "media": bool(media_tools_used),
+            "tools": tools_str,
         }
         _recent_addressed.append(entry)
 
@@ -335,7 +346,8 @@ def log_addressed_turn_metrics(
             f"{cid_prefix()}[ADDRESSED] latency_ms={entry['latency_ms']} prompt={entry['prompt_tokens']} "
             f"search_offered={str(entry['search_schemas_offered']).lower()} "
             f"chose_search={str(entry['chose_search']).lower()} chose_direct={str(entry['chose_direct']).lower()} "
-            f"need={entry['need']}"
+            f"chose_recent={str(entry['chose_recent']).lower()} chose_respond={str(entry['chose_respond']).lower()} "
+            f"media={str(entry['media']).lower()} tools=[{entry['tools']}] need={entry['need']}"
         )
     except Exception:
         # metrics must never impact main path
