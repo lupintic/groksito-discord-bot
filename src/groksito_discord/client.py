@@ -64,6 +64,14 @@ from .integrations import steam
 # duplicated logic from conversation.py.
 from .utils.text import extract_urls_from_text
 
+# Dedicated /audio slash (reuses 100% of audio_handler.py for TTS + fancy voice delivery
+# via the image_delivery direct-delivery tracker; no duplication of generation or bubble logic).
+from .image_delivery import register_image_request
+from .media.audio_handler import (
+    _tool_generate_audio,
+    prepare_text_from_interaction,
+)
+
 logger = logging.getLogger("groksito.client")
 
 
@@ -410,6 +418,101 @@ def register_slash_commands(
             embeds.append(embed)
 
         await interaction.followup.send(embeds=embeds)
+
+    # /audio — dedicated TTS/voice slash command.
+    # - text is optional (for reply-to use case).
+    # - voice uses app_commands.choices (eve/ara/rex/sal/leo) with friendly names.
+    # - When invoked as reply to another message (no or with text): reads/combines using helper.
+    # - Uses guild whitelist + rate limiter (counts as a user request).
+    # - Defers ephemerally for "generating" UX.
+    # - Registers for direct delivery + calls core _tool_generate_audio (reuses EVERYTHING:
+    #   text prep, xAI call, pydub transcode, real waveform, voice flag bubble, context log).
+    # - Ephemeral confirmation after; the voice bubble itself is delivered publicly in channel.
+    @tree.command(
+        name="audio",
+        description="Genera audio hablado (TTS) usando voces de Grok. Responde a un mensaje para leerlo.",
+    )
+    @discord.app_commands.choices(
+        voice=[
+            discord.app_commands.Choice(name="Eve (energética, recomendada)", value="eve"),
+            discord.app_commands.Choice(name="Ara (cálida)", value="ara"),
+            discord.app_commands.Choice(name="Rex (profesional)", value="rex"),
+            discord.app_commands.Choice(name="Sal (equilibrada)", value="sal"),
+            discord.app_commands.Choice(name="Leo (autoritativa)", value="leo"),
+        ]
+    )
+    async def audio_slash(
+        interaction: discord.Interaction,
+        text: Optional[str] = None,
+        voice: Optional[discord.app_commands.Choice[str]] = None,
+    ):
+        # Guild whitelist (same as every other slash command)
+        if interaction.guild and not is_guild_allowed(interaction.guild.id):
+            await interaction.response.send_message(
+                "Groksito no está disponible en este servidor.", ephemeral=True
+            )
+            return
+
+        # Rate limit (audio gen consumes resources like a conversational request)
+        rl = getattr(client, "rate_limiter", rate_limiter)
+        can_use, _ = rl.check(interaction.user.id)
+        if not can_use:
+            await interaction.response.send_message(
+                "Tranquilo campeón, ya usaste tus 6 requests este minuto.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Build text (reply support if user replied to a msg then ran /audio)
+        provided = (text or "").strip()
+        final_text = await prepare_text_from_interaction(interaction, provided)
+
+        if not final_text:
+            await interaction.followup.send(
+                "Por favor proporciona texto o responde a un mensaje para leerlo en voz alta.",
+                ephemeral=True,
+            )
+            return
+
+        # Resolve voice (user choice or config default) + language
+        selected_voice = voice.value if voice else getattr(settings, "tts_default_voice", "eve") or "eve"
+        selected_lang = getattr(settings, "tts_default_language", "es") or "es"
+
+        # Register using the Interaction as original_message (delivery code now supports it for public channel send)
+        request_id = None
+        try:
+            ch = getattr(interaction, "channel", None)
+            request_id = await register_image_request(
+                user_id=interaction.user.id,
+                channel_id=getattr(ch, "id", 0) or 0,
+                message_id=getattr(interaction, "id", 0),
+                operation_type="audio",
+                original_message=interaction,
+            )
+        except Exception as reg_err:
+            logger.warning(f"[AudioSlash] Failed to register audio request: {reg_err}")
+
+        # Call core tool directly (it will consume the request and do direct delivery of voice bubble if possible)
+        result = await _tool_generate_audio(
+            text=final_text,
+            voice=selected_voice,
+            language=selected_lang,
+            request_id=request_id,
+        )
+
+        # Ephemeral confirmation to the user who ran the command (the audio itself is public via direct delivery)
+        if result and "SUCCESS" in result:
+            await interaction.followup.send(
+                f"✅ Audio generado con la voz **{selected_voice}** y enviado al canal.",
+                ephemeral=True,
+            )
+        else:
+            # Surface the (Spanish) error or note from the handler
+            await interaction.followup.send(
+                result or "No se pudo generar el audio.",
+                ephemeral=True,
+            )
 
 
 # =============================================================================
