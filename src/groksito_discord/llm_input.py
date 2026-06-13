@@ -1,1 +1,315 @@
-[full content from read]
+"""
+LLM Input Builder for Groksito (Responses API).
+
+Responsibilities:
+- Context classification (casual/minimal/normal/rich/image_gen) via classify (drives tool offering: native web/x only on normal/rich; zero custom on casual/minimal)
+- Minimal context injection: the high-priority referenced [R:...] message for direct replies *to the bot* OR when the bot is directly @mentioned while the user replies to another message (the "describe this YT link my friend posted" case)
+- No automatic per-user memory injection ("let Grok be Grok")
+- No automatic recent conversation summary / raw recent pre-injection (ticket #19): recent context is on-demand via the get_recent_context tool only.
+- Dynamic context as separate system msg (for prompt caching friendliness)
+- Multimodal vision (input_image high detail)
+
+The concise SYSTEM_PROMPT from prompt.py is used exclusively.
+This is the single source of truth for building the input sent to the Responses API.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, TypedDict
+
+from .correlation import cid_prefix
+
+from .config import settings
+from .prompt import SYSTEM_PROMPT
+from .context import (
+    is_pure_image_generation_request,
+)
+
+# classify_query_context_need removed in #24 cleanup (heavy tier logic excised).
+# We use a minimal local version that only special-cases pure image_gen and
+# otherwise returns "normal" for addressed conversational turns (the only time
+# build_responses_input is invoked). This keeps "need" strings flowing to
+# logging + native tool schema selection without reintroducing the deprecated
+# keyword bloat / full classifier.
+def _classify_query_context_need(text: str, is_reply_continuation: bool = False) -> str:
+    t = (text or "").strip()
+    if not t:
+        return "minimal"
+    try:
+        if is_pure_image_generation_request(t):
+            return "image_gen"
+    except Exception:
+        pass
+    # For normal addressed chat (mentions/replies), "normal" is the sensible
+    # default post-cleanup (lets native tools be offered when Grok needs them;
+    # casual/minimal paths still exist for ultra-short non-queries via the
+    # forcing logic below).
+    return "normal"
+from .token_usage import log_context_injection
+
+
+class ResponsesInputData(TypedDict):
+    """Lightweight structural type for the return value of build_responses_input.
+
+    This documents the shape without changing any runtime behavior.
+    Used by the LLM orchestrator to unpack initial_input, classification need,
+    and various context blocks for logging/caching decisions.
+    """
+    initial_input: list[dict]
+    stable_prefix_len: int
+    need: str
+    user_id: str
+    user_message_text: str
+    dynamic_context_block: str
+    emoji_full_block: str
+
+logger = logging.getLogger("groksito.llm")
+
+
+def _build_multimodal_user_content(
+    user_message: str,
+    image_urls: list[str] | None,
+) -> list[dict] | str:
+    """
+    Constructs the 'content' for a user message in the Responses API.
+
+    When images are present, uses the multimodal format required by
+    the xAI /v1/responses endpoint:
+
+        [
+            {"type": "input_text", "text": "..."},
+            {"type": "input_image", "image_url": "https://...", "detail": "high"},
+            ...
+        ]
+
+    Returns a plain string when there are no images.
+    """
+    if not image_urls:
+        return user_message or ""
+
+    content: list[dict] = []
+    text = (user_message or "").strip()
+    content.append({"type": "input_text", "text": text})
+
+    for url in image_urls[:3]:
+        content.append({
+            "type": "input_image",
+            "image_url": url,
+            "detail": "high",
+        })
+
+    return content
+
+
+async def build_responses_input(
+    *,
+    user_message: str,
+    channel_id: int,
+    original_message: Any,
+    image_urls: list[str] | None,
+    referenced_context: dict | None,
+    reply_chain_contexts: list[dict] | None = None,  # deeper ancestors from reply chain for text referents (YouTube links, "what the user said", etc.)
+    is_reply_continuation: bool,
+    has_x_link_intent: bool,
+    image_gen_intent: bool = False,
+    is_reply_to_bot: bool = False,   # Direct reply to one of our messages
+    is_mentioned: bool = False,      # Direct @mention of the bot (strong address signal; also enables referenced context + recent summary)
+) -> dict[str, Any]:
+    """
+    The single, correct, non-duplicated input builder for the first Responses API call.
+
+    It is the ONLY place in the codebase that constructs `initial_input`.
+    Always uses the concise SYSTEM_PROMPT.
+
+    Referenced context ([R:]) + reply_chain_contexts (deeper ancestors for text) are provided for:
+    - Direct replies to the bot, or
+    - Direct @mentions (with or without formal reply) when referring to recent user content
+      ("what the user said", "the video/image the user posted", links in the thread, etc.).
+    Enables deeper text chain walking while staying lightweight (gated + small depth/truncation).
+
+    Recent conversation context is deliberately NOT pre-injected (see #19); it is available
+    on-demand only if the model calls the get_recent_context custom tool.
+    """
+    user_id = ""
+    user_message_text = user_message or ""
+    try:
+        if original_message and getattr(original_message, "author", None):
+            user_id = str(getattr(original_message.author, "id", ""))
+    except Exception:
+        pass
+
+    # === Context Classification (for tool offering decisions) ===
+    # "casual" / "minimal" / "image_gen" -> zero custom tools + no native search (ultra light).
+    # "normal" / "rich" -> may offer native web/x_search (x_search only on clear signals for efficiency).
+    # Injection is decoupled and always minimal (only [R:] on bot replies).
+    smart_mode = getattr(settings, "context_smart_mode", True)
+    need = "normal"
+    try:
+        need = _classify_query_context_need(user_message_text, is_reply_continuation=is_reply_continuation)
+    except Exception:
+        need = "normal"
+
+    # For non-reply first-turn without explicit inquiry, force "casual" or "minimal"
+    # (affects tool selection, not injection anymore).
+    if not is_reply_continuation and not has_x_link_intent:
+        if need not in ("rich", "normal"):
+            need = "casual" if need == "minimal" or need == "casual" else "minimal"
+
+    if smart_mode and (need in ("casual", "minimal", "image_gen")) and not is_reply_continuation:
+        if need == "image_gen" or image_gen_intent:
+            # === SPECIAL ULTRA-LIGHT "image_gen" MODE ===
+            # Absolute zero dynamic context + tiny tool. Most aggressive for image prompts.
+            logger.debug(f"{cid_prefix()}[CONTEXT] IMAGE_GEN ultra mode (ZERO context + 1 tiny tool) (user={user_id[:6]}...): targeting <1000 tokens")
+        else:
+            logger.debug(f"{cid_prefix()}[CONTEXT] ZERO context for {need}")
+    # Handle reply forcing: ensure need is at least "normal" on continuations/replies
+    # (affects whether native tools are offered on reply threads).
+    if is_reply_continuation and need in ("casual", "minimal"):
+        need = "normal"
+        logger.debug(f"{cid_prefix()}[CONTEXT] Reply detected ΓÇö forcing normal level for tool decisions (skipped ultra-light)")
+
+    # On direct mentions with recent referent language ("the user", "the image the user posted", etc.),
+    # ensure we are at least "normal" so native tools are available if Grok's reasoning needs them,
+    # while still keeping the injection lightweight.
+    if is_mentioned and (has_x_link_intent or "usuario" in user_message_text.lower() or "user" in user_message_text.lower() or "imagen" in user_message_text.lower() or "image" in user_message_text.lower()):
+        if need in ("casual", "minimal"):
+            need = "normal"
+            logger.debug(f"{cid_prefix()}[CONTEXT] Direct mention + recent referent signals ΓÇö forcing normal for context/tools")
+
+    # === MINIMAL CONTEXT INJECTION ===
+    # High-priority referenced message [R:] is injected when:
+    # - Direct reply *to the bot* (is_reply_to_bot), OR
+    # - The bot is directly @mentioned in a reply to another user's message.
+    # The latter is the explicit "hey groksito, look at what my friend just posted (YT link, image, etc.)" case.
+    # No channel history / summaries / get_channel dumps ever by default (except the opt-in recent summary on addressed turns).
+    # Grok relies on its native state + the explicit ref for reply coherence.
+    context_parts = []
+
+    if referenced_context and (is_reply_to_bot or is_mentioned):
+        ref_summary = referenced_context
+        x_links = ref_summary.get("x_links") or []
+        ext_links = ref_summary.get("external_links") or []
+        addr = "reply_to_bot" if is_reply_to_bot else "mentioned_in_reply"
+
+        if ref_summary.get("image_urls"):
+            logger.info(f"{cid_prefix()}[LLM] High-priority reply context with {len(ref_summary['image_urls'])} image(s) injected (addr={addr})")
+        if x_links:
+            logger.info(f"{cid_prefix()}[LLM] High-priority reply context with {len(x_links)} X link(s) - model should use x_search if needed (addr={addr})")
+        if ext_links and not x_links:
+            logger.info(f"{cid_prefix()}[LLM] High-priority reply context with {len(ext_links)} external link(s) (e.g. YouTube) injected (addr={addr})")
+        if not (ref_summary.get("image_urls") or x_links or ext_links):
+            logger.info(f"{cid_prefix()}[LLM] High-priority reply context injected (text only, addr={addr})")
+
+        ref_content = (ref_summary.get("content") or "").strip()[:150]
+        high_priority_ref = f"[R:{ref_summary.get('author','?')}] {ref_content}"
+        context_parts.append(high_priority_ref)
+
+    # Deeper reply chain ancestors for text context (when direct referenced is not the original source).
+    # E.g. user mentions Groksito while asking about a YouTube / statement that was in a grandparent message.
+    # Injected as additional high-signal context so the model can reason about the true referent.
+    # Only on addressed turns, limited to 1-2 useful ancestors, very truncated.
+    if reply_chain_contexts and (is_reply_to_bot or is_mentioned):
+        ancestor_lines = []
+        for i, ctx in enumerate(reply_chain_contexts[1:3]):  # skip level 0 (usually the direct referenced)
+            content = (ctx.get("content") or "").strip()[:100]
+            author = ctx.get("author", "?")
+            links = (ctx.get("external_links") or [])[:1]
+            link_note = f" (link: {links[0]})" if links else ""
+            if content or links:
+                ancestor_lines.append(f"[Chain ancestor {i+1} by {author}]{link_note} {content}")
+        if ancestor_lines:
+            chain_block = "\n".join(ancestor_lines)
+            context_parts.append(chain_block)
+            logger.info(f"{cid_prefix()}[LLM] Injected {len(ancestor_lines)} reply chain ancestor(s) for text referent resolution")
+
+    dynamic_context_block = ""
+    if context_parts:
+        dynamic_context_block = "\n\n".join(context_parts)
+
+    # === Recent Conversation Context ===
+    # Pre-injection of summaries removed (ticket #19): recent context is now strictly on-demand.
+    # Grok calls the get_recent_context tool (offered via light decision tools on addressed turns)
+    # only when it determines the summary is necessary for coherence or referent resolution.
+    # No automatic summary or raw recent blocks are injected here. This eliminates the
+    # extra Responses roundtrip on simple @mentions and lets native reasoning decide.
+    # Referent resolution on strong addressed cases now relies on: tool use when needed,
+    # the high-priority [R:] ref (for direct bot replies / mentions-in-reply), reply chain
+    # ancestors, and Grok's native long context across turns (previous_response_id).
+
+    # === Server Custom Emojis (emote knowledge) ===
+    # Metadata scanned on startup. Vision descriptions + "most used" ranking built lazily from
+    # messages the bot actually sees (no Discord usage stats API exists).
+    #
+    # How Groksito decides when to use them (important for not being spammy):
+    # - The block is ONLY injected on addressed turns (when it's actually replying).
+    # - The list is ranked by real usage in the server + has vision descriptions so the model
+    #   understands the *meaning* and vibe of each emote.
+    # - Explicit guidance in the block: "use naturally and sparingly... only when the tone/context calls for it."
+    # - On addressed turns the model sees the user's message tone + any tool-provided recent context (if called),
+    #   so it has strong signals for whether the moment is playful, meme-y, sarcastic, serious, etc.
+    # - Because it's the base Grok model + previous_response_id on continuations, it tends to be
+    #   tasteful rather than emoji-bombing every reply.
+    #
+    # See emoji_registry.py for the full design. The goal is "Grok-like" natural usage, not forced emotes.
+    emoji_full_block = ""
+    try:
+        from . import emoji_registry
+        gid = None
+        try:
+            if original_message and getattr(original_message, "guild", None):
+                gid = getattr(original_message.guild, "id", None)
+        except Exception:
+            pass
+
+        # Only pay the cost of the (potentially long) list when we're addressed.
+        should_inject_full_emoji_list = is_reply_to_bot or is_mentioned
+        if should_inject_full_emoji_list:
+            emoji_full_block = emoji_registry.get_emoji_descriptions_for_prompt(gid, max_emotes=40)
+            if emoji_full_block:
+                logger.debug(f"{cid_prefix()}[CONTEXT] Injected full server custom emoji list (addressed turn)")
+    except Exception:
+        pass
+
+    try:
+        injected_chars = len(dynamic_context_block)
+        injected_tokens = max(30, injected_chars // 4)
+        log_context_injection(
+            injected_tokens=injected_tokens,
+            description=f"smart:{need}",
+            has_memory=False,
+            has_summary=False,
+        )
+    except Exception:
+        pass
+
+    # Multimodal content (correct format)
+    user_content = _build_multimodal_user_content(user_message, image_urls)
+
+    # =====================================================================
+    # THE SINGLE AUTHORITATIVE initial_input CONSTRUCTION
+    # Always uses the concise SYSTEM_PROMPT (separate system msg for
+    # dynamic context + optional recent conversation context, for optimal
+    # prompt caching). Recent context is only present on addressed turns.
+    # =====================================================================
+    system_messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    if dynamic_context_block:
+        system_messages.append({"role": "system", "content": dynamic_context_block})
+
+    if emoji_full_block:
+        system_messages.append({"role": "system", "content": emoji_full_block})
+
+    initial_input: list[dict] = system_messages + [{"role": "user", "content": user_content}]
+    stable_prefix_len = len(SYSTEM_PROMPT)
+
+    result: ResponsesInputData = {
+        "initial_input": initial_input,
+        "stable_prefix_len": stable_prefix_len,
+        "need": need,
+        "user_id": user_id,
+        "user_message_text": user_message_text,
+        "dynamic_context_block": dynamic_context_block,
+        "emoji_full_block": emoji_full_block,
+    }
+    return result
