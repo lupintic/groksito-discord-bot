@@ -6,7 +6,7 @@ from pathlib import Path
 # Make src importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import groksito_discord.tools as tools_mod
+import groksito_discord.llm.tools as tools_mod
 
 print("✓ tools.py imported successfully after Chunk 1 edits")
 print("  - execute_hybrid_tool present:", hasattr(tools_mod, "execute_hybrid_tool"))

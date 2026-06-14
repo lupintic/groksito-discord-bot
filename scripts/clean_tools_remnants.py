@@ -2,7 +2,7 @@
 from pathlib import Path
 import re
 
-path = Path("src/groksito_discord/tools.py")
+path = Path("src/groksito_discord/llm/tools.py")
 content = path.read_text(encoding="utf-8")
 
 # Strategy: locate the comment that was left from the bad paste and the next real def get_continuation_tools

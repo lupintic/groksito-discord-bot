@@ -60,7 +60,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
-from .config import settings
+from ..config import settings
 
 logger = logging.getLogger("groksito.grok_oauth")
 

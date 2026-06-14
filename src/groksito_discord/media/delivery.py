@@ -23,7 +23,7 @@ import time
 import uuid
 from typing import Any, Optional, TypedDict
 
-from .correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
 
 class PendingImageRequest(TypedDict):

@@ -107,7 +107,7 @@ def _is_running_in_docker() -> bool:
 
 # Optional import for OAuth (lazy so api_key users don't pay import cost)
 try:
-    from .grok_oauth import (
+    from .core.grok_oauth import (
         login_oauth_interactive,
         logout_oauth,
         print_auth_status,
@@ -185,7 +185,7 @@ async def main() -> None:
 
     # Lightweight early auth probe (prefers OAuth token if present; does not force login)
     try:
-        from .grok_oauth import get_grok_bearer
+        from .core.grok_oauth import get_grok_bearer
         b = get_grok_bearer() if get_grok_bearer else None
         if b:
             src = "OAuth token (SuperGrok)" if settings.auth_prefers_oauth or settings.using_oauth else "API key (or OAuth fallback)"
@@ -208,13 +208,13 @@ async def main() -> None:
     # Write an early "process is alive, connecting" heartbeat so the web
     # dashboard doesn't show "down" during the normal ~10-30s startup window.
     try:
-        from .health import write_bot_heartbeat
+        from .core.health import write_bot_heartbeat
         write_bot_heartbeat(connected=False, user="starting...")
     except Exception:
         pass
 
     try:
-        from .client import ensure_discord_connected
+        from .discord.client import ensure_discord_connected
 
         # This process is the CONVERSATIONAL OWNER
         client = await ensure_discord_connected(conversational=True)
@@ -248,7 +248,7 @@ def run() -> None:
         if cmd in ("--status", "-s"):
             _print_config_summary()
             try:
-                from .health import print_health_status
+                from .core.health import print_health_status
                 print_health_status()
             except Exception as e:
                 logger.error(f"Health check failed: {e}")
@@ -307,7 +307,7 @@ def run() -> None:
                 print("OAuth support module not loaded.")
             # Also show basic health if possible
             try:
-                from .health import print_health_status
+                from .core.health import print_health_status
                 print_health_status()
             except Exception:
                 pass

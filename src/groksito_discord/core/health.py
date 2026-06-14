@@ -38,7 +38,7 @@ def get_heartbeat_path(data_dir: Path | None = None) -> Path:
     """Return the path to the bot heartbeat file (used by web dashboard too)."""
     if data_dir is None:
         try:
-            from .config import settings
+            from ..config import settings
             data_dir = settings.data_dir
         except Exception:
             data_dir = Path("./data")
@@ -85,7 +85,7 @@ def _get_data_file(filename: str, data_dir: Path | None = None) -> Path:
     """Resolve a data/ file path (consistent with heartbeat)."""
     if data_dir is None:
         try:
-            from .config import settings
+            from ..config import settings
             data_dir = settings.data_dir
         except Exception:
             data_dir = Path("./data")
@@ -186,11 +186,11 @@ def get_health_status() -> dict[str, Any]:
     }
 
     modules_to_check = [
-        "client",
-        "conversation",
+        "discord.client",
+        "core.conversation",
         "context",
-        "media_tools",
-        "tools",
+        "llm.media_tools",
+        "llm.tools",
         "llm",
     ]
 
@@ -209,14 +209,14 @@ def get_health_status() -> dict[str, Any]:
 
     # Check for video capability
     try:
-        from .media_tools import ENABLE_VIDEO_GENERATION
+        from ..llm.media_tools import ENABLE_VIDEO_GENERATION
         status["video_generation_enabled"] = ENABLE_VIDEO_GENERATION
     except Exception:
         status["video_generation_enabled"] = False
 
     # Emoji / custom emote knowledge (vision-described lazily only for actually used emotes)
     try:
-        from . import emoji_registry
+        from ..utils import emoji_registry
         stats = emoji_registry.get_emoji_stats()
         status["emoji_knowledge_count"] = stats.get("total_emotes", 0)
         status["emoji_knowledge_with_usage"] = stats.get("emotes_with_usage", 0)
@@ -248,7 +248,7 @@ def get_health_status() -> dict[str, Any]:
 
     # Credential presence (safe — only booleans, helps during live testing setup)
     try:
-        from .config import settings
+        from ..config import settings
         status["has_discord_token"] = bool(settings.discord_bot_token)
         status["has_xai_key"] = bool(settings.xai_api_key)
         status["grok_auth_mode"] = settings.auth_mode

@@ -10,7 +10,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 try:
-    from groksito_discord.env_utils import (
+    from groksito_discord.utils.env_utils import (
         safe_write_env,
         _format_env_value,
         _format_list_for_display,

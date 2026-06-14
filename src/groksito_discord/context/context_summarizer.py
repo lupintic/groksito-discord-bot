@@ -27,7 +27,7 @@ import os
 from typing import Any
 
 from ..config import settings
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
 logger = logging.getLogger("groksito.context.summarizer")
 
@@ -89,13 +89,13 @@ async def summarize_recent_conversation(channel_id: int) -> str | None:
 
     try:
         # Lazy import to keep module lightweight and avoid import cycles at startup.
-        from ..context import get_recent_channel_messages
-        from ..llm_utils import _call_responses_with_retry, _extract_final_text
+        from .core import get_recent_channel_messages
+        from ..llm.llm_utils import _call_responses_with_retry, _extract_final_text
 
         # Bearer resolution (same logic as the main LLM path for consistency).
         # Prefers valid OAuth if available, falls back to XAI_API_KEY.
         try:
-            from ..grok_oauth import get_grok_bearer as _get_grok_bearer
+            from ..core.grok_oauth import get_grok_bearer as _get_grok_bearer
         except Exception:
             _get_grok_bearer = None  # type: ignore
 

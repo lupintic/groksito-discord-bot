@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import patch
 
 import groksito_discord.context as context_mod
+import groksito_discord.context.core as context_core_mod
 
 
 def test_get_video_quota_default_zero():
@@ -27,11 +28,12 @@ def test_increment_video_quota_increments_and_returns_values():
     assert used == 0
     assert rem == 5
 
-    with patch.object(context_mod, "save_context", return_value=True) as mock_save:
+    with patch.object(context_mod, "save_context", return_value=True) as mock_save, \
+         patch.object(context_core_mod, "save_context", return_value=True) as mock_save_core:
         u1, r1 = context_mod.increment_video_quota(uid)
         assert u1 == 1
         assert r1 == 4
-        assert mock_save.called
+        assert mock_save.called or mock_save_core.called
 
         u2, r2 = context_mod.increment_video_quota(uid)
         assert u2 == 2
@@ -71,7 +73,8 @@ def test_quota_resets_on_new_day(frozen_today):
 
     # Day 1: use 3
     frozen_today("2026-01-15")
-    with patch.object(context_mod, "save_context", return_value=True):
+    with patch.object(context_mod, "save_context", return_value=True), \
+         patch.object(context_core_mod, "save_context", return_value=True):
         for _ in range(3):
             context_mod.increment_video_quota(uid)
 
@@ -86,7 +89,8 @@ def test_quota_resets_on_new_day(frozen_today):
     assert rem == 5
 
     # Using on the new day does not affect previous day (in-memory only keeps today on load, but here we test increment)
-    with patch.object(context_mod, "save_context", return_value=True):
+    with patch.object(context_mod, "save_context", return_value=True), \
+         patch.object(context_core_mod, "save_context", return_value=True):
         context_mod.increment_video_quota(uid)
 
     used, rem = context_mod.get_video_quota(uid)

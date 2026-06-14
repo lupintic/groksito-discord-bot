@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from groksito_discord.health import get_health_status
+from groksito_discord.core.health import get_health_status
 
 
 def test_health_docker_probe_reports_availability():

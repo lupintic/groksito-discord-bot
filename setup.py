@@ -56,7 +56,7 @@ def _import_shared_env_utils():
         src_dir = Path(__file__).resolve().parent / "src"
         if str(src_dir) not in sys.path:
             sys.path.insert(0, str(src_dir))
-        from groksito_discord.env_utils import (
+        from groksito_discord.utils.env_utils import (
             safe_write_env as _safe_write,
             parse_env_file as _parse_file,
             parse_env_lines as _parse_lines,
@@ -398,7 +398,7 @@ def _try_run_oauth_login() -> bool:
         if str(src_dir) not in sys.path:
             sys.path.insert(0, str(src_dir))
 
-        from groksito_discord.grok_oauth import login_oauth_interactive
+        from groksito_discord.core.grok_oauth import login_oauth_interactive
     except Exception as e:
         say(f"No se pudo cargar el módulo de OAuth: {e}", "red")
         say("Puedes ejecutarlo manualmente después:")

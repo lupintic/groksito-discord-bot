@@ -38,12 +38,12 @@ from typing import Any, Optional
 
 import httpx
 
-from .config import settings
+from ..config import settings
 from .correlation import cid_prefix
 
 # Bearer resolution (same as media handlers)
 try:
-    from .grok_oauth import get_grok_bearer
+    from ..core.grok_oauth import get_grok_bearer
 except Exception:
     get_grok_bearer = None  # type: ignore
 

@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..context import get_recent_channel_messages
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 from .skill_registry import get_skill_registry, Skill
 
 logger = logging.getLogger("groksito.skills.proposer")
@@ -584,8 +584,8 @@ async def _maybe_polish_proposal(base: SkillProposal) -> SkillProposal | None:
     try:
         # We only do this if we have credentials; otherwise we keep the solid base text.
         from openai import AsyncOpenAI
-        from ..llm_utils import _call_responses_with_retry
-        from ..grok_oauth import get_grok_bearer as _get_grok_bearer  # type: ignore
+        from ..llm.llm_utils import _call_responses_with_retry
+        from ..core.grok_oauth import get_grok_bearer as _get_grok_bearer  # type: ignore
         from ..config import settings as _settings
 
         bearer = None

@@ -15,7 +15,7 @@ import random
 import unicodedata
 from typing import Any
 
-from .correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
 from openai import (
     AsyncOpenAI,
@@ -25,15 +25,15 @@ from openai import (
     APIConnectionError,
 )
 
-from .config import settings
-from .prompt import SUMMARIZATION_PROMPT
-from .context import (
+from ..config import settings
+from .prompt_builder import SUMMARIZATION_PROMPT
+from ..context import (
     get_estimated_history_tokens,
     get_messages_for_summarization,
     update_channel_summary,
     is_pure_image_generation_request,
 )
-from .token_usage import (
+from ..utils.token_usage import (
     log_usage,
     log_cache_metrics,
 )
@@ -42,7 +42,7 @@ from .token_usage import (
 # Re-exported here for backward compat with any remaining imports in
 # llm.py / conversation.py / call sites. Light non-brittle implementations
 # live in intents.py.
-from .intents import (
+from ..core.intent import (
     _detect_visual_intent,
     _detect_image_creation_intent,
 )

@@ -13,7 +13,7 @@ This file only provides backward-compatible re-exports.
 
 from __future__ import annotations
 
-from .media.image_handler import (
+from .image_handler import (
     _handle_edit_image,
     _tool_edit_image,
 )

@@ -11,21 +11,26 @@ from unittest.mock import patch
 # Import the modules under test so we can reset internal state safely.
 # Using the package import (src on pythonpath via pytest config).
 import groksito_discord.context as context_mod
-import groksito_discord.media_tools as media_tools_mod
-import groksito_discord.tools as tools_mod
+import groksito_discord.context.core as context_core
+import groksito_discord.llm.media_tools as media_tools_mod
+import groksito_discord.llm.tools as tools_mod
 
 
 @pytest.fixture(autouse=True)
 def reset_global_state():
     """Reset mutable module globals between tests to keep tests isolated and repeatable."""
-    # Video quotas (in-memory daily counters)
+    # Video quotas (in-memory daily counters) - clear on both for compat with reorg
     if hasattr(context_mod, "_video_quotas"):
         context_mod._video_quotas.clear()
+    if hasattr(context_core, "_video_quotas"):
+        context_core._video_quotas.clear()
 
     yield
 
     if hasattr(context_mod, "_video_quotas"):
         context_mod._video_quotas.clear()
+    if hasattr(context_core, "_video_quotas"):
+        context_core._video_quotas.clear()
 
 
 @pytest.fixture
@@ -41,10 +46,12 @@ def frozen_today(monkeypatch):
         fixed = date.fromisoformat(iso_date)
         # Patch both the date.today used inside context and the date class if referenced directly.
         monkeypatch.setattr(context_mod, "date", type("date", (), {"today": staticmethod(lambda: fixed), "fromisoformat": staticmethod(date.fromisoformat)}))
+        monkeypatch.setattr(context_core, "date", type("date", (), {"today": staticmethod(lambda: fixed), "fromisoformat": staticmethod(date.fromisoformat)}))
         # Also patch in case other modules imported date.
         try:
             import groksito_discord.context as cm  # ensure
             monkeypatch.setattr("groksito_discord.context.date", type("d", (), {"today": staticmethod(lambda: fixed)}))
+            monkeypatch.setattr("groksito_discord.context.core.date", type("d", (), {"today": staticmethod(lambda: fixed)}))
         except Exception:
             pass
         return fixed
