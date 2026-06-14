@@ -12,7 +12,8 @@ Design:
 - Used by media_tools (generate_image, edit_image, generate_video).
 
 Used by media_tools (generate_image, edit_image, generate_video, generate_audio) via the
-DIRECT_DELIVERY_PERFORMED sentinel pattern.
+DIRECT_DELIVERY_PERFORMED sentinel pattern. Actual Discord attachment delivery lives in
+media/delivery.py.
 """
 
 from __future__ import annotations

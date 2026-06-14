@@ -162,32 +162,15 @@ async def build_responses_input(
     except Exception:
         need = "normal"
 
-    # For non-reply first-turn without explicit inquiry, force "casual" or "minimal"
-    # (affects tool selection, not injection anymore).
-    if not is_reply_continuation and not has_x_link_intent:
-        if need not in ("rich", "normal"):
-            need = "casual" if need == "minimal" or need == "casual" else "minimal"
-
-    if smart_mode and (need in ("casual", "minimal", "image_gen")) and not is_reply_continuation:
-        if need == "image_gen" or image_gen_intent:
-            # === SPECIAL ULTRA-LIGHT "image_gen" MODE ===
-            # Absolute zero dynamic context + tiny tool. Most aggressive for image prompts.
-            logger.debug(f"{cid_prefix()}[CONTEXT] IMAGE_GEN ultra mode (ZERO context + 1 tiny tool) (user={user_id[:6]}...): targeting <1000 tokens")
-        else:
-            logger.debug(f"{cid_prefix()}[CONTEXT] ZERO context for {need}")
-    # Handle reply forcing: ensure need is at least "normal" on continuations/replies
-    # (affects whether native tools are offered on reply threads).
-    if is_reply_continuation and need in ("casual", "minimal"):
+    # Addressed turns (mention or reply-to-bot) default to "normal" so native tools are available.
+    # Pure image_gen keeps its ultra-light path. The model decides which tools to call.
+    if (is_mentioned or is_reply_to_bot) and need not in ("image_gen",):
         need = "normal"
-        logger.debug(f"{cid_prefix()}[CONTEXT] Reply detected ΓÇö forcing normal level for tool decisions (skipped ultra-light)")
+    elif is_reply_continuation and need in ("casual", "minimal"):
+        need = "normal"
 
-    # On direct mentions with recent referent language ("the user", "the image the user posted", etc.),
-    # ensure we are at least "normal" so native tools are available if Grok's reasoning needs them,
-    # while still keeping the injection lightweight.
-    if is_mentioned and (has_x_link_intent or "usuario" in user_message_text.lower() or "user" in user_message_text.lower() or "imagen" in user_message_text.lower() or "image" in user_message_text.lower()):
-        if need in ("casual", "minimal"):
-            need = "normal"
-            logger.debug(f"{cid_prefix()}[CONTEXT] Direct mention + recent referent signals ΓÇö forcing normal for context/tools")
+    if smart_mode and (need == "image_gen" or image_gen_intent):
+        logger.debug(f"{cid_prefix()}[CONTEXT] IMAGE_GEN ultra mode (user={user_id[:6]}...)")
 
     # === MINIMAL CONTEXT INJECTION ===
     # High-priority referenced message [R:] is injected when:

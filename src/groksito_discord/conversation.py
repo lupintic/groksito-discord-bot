@@ -145,37 +145,14 @@ async def _resolve_referenced_and_activation(
         # even for broader inquiries. The broadening no longer affects wake-up decisions.
         has_x_link_intent = has_specific_x or has_general_reply_inquiry
 
-        explicit_image_reply_keywords = [
-            # Edit/transform style operations on a specific image
-            "edita esta", "edita la", "edit├í esta", "edit├í la",
-            "transforma esta", "transforma la", "convierte esta", "convierte la",
-            "pasa esta a", "pasa la a", "cambia esta a", "cambia la a",
-            "redibuja esta", "redibuja la",
-            "meme con esta", "meme con la", "haz un meme con esta",
-            "genera un estilo con esta", "haz un estilo con esta",
-            # Analysis / describe the referenced image (broadened for reliability)
-            "qu├⌐ ves en esta", "qu├⌐ ves en la", "analiza esta", "analiza la",
-            "describe", "qu├⌐ ves", "cu├⌐ntame de esta", "qu├⌐ hay en esta",
-            "qu├⌐ ves aqu├¡", "qu├⌐ ves en la foto", "qu├⌐ ves en la imagen",
-            "explica esta", "explica la", "explica esto", "describe esta", "describe la",
-            # Common casual references to the image being replied to
-            "qu├⌐ es esto", "esto qu├⌐ es", "qu├⌐ es esta", "mira esta", "mira la", "mira esto",
-            "opina de esta", "qu├⌐ opinas de esta", "qu├⌐ piensas de esta", "esta imagen", "esta foto",
-            # Reference to previous / bot-generated image (critical for text-URL case)
-            "esa imagen", "esas im├ígenes", "la imagen", "esa foto", "la foto",
-            "la que generaste", "la que mandaste", "la anterior", "la de antes",
-            "la foto anterior", "el video anterior", "la generada", "la del bot",
-            "basado en esta", "usando esta", "con esta imagen", "con esta foto",
-            "la que respond├¡", "la url de la", "esa url",
-            # Video / animation from image
-            "video de esta", "video de la", "haz un video de esta", "haz un video de la",
-            "genera un video de esta", "genera un video de la", "crea un video de esta",
-            "anima esta", "anima la", "convierte esta en video", "convierte la en video",
-            "video con esta foto", "haz video de la que respond├¡",
-        ]
-        if any(kw in text_lower for kw in explicit_image_reply_keywords):
+        # Replying to content with images → vision/media tools available; Grok decides usage.
+        referenced_has_images = any(
+            getattr(a, "content_type", "").startswith("image/")
+            for a in (getattr(referenced, "attachments", []) or [])
+        )
+        if referenced_has_images:
             explicit_visual_reply_intent = True
-            logger.info(f"{cid_p}[Reply] Visual follow-up intent detected in reply")
+            logger.info(f"{cid_p}[Reply] Reply to message with image attachment(s)")
 
         if has_x_link_intent:
             logger.info(f"{cid_p}[Reply] Reply inquiry intent detected (user appears to be asking about the referenced message content)")
@@ -188,18 +165,15 @@ async def _resolve_referenced_and_activation(
         if not (message.reference and message.reference.message_id):
             logger.info(f"{cid_p}[Mention] Recent referent / inquiry language on direct mention (ensuring recent context + possible vision for referent)")
 
-    # === STRICT REPLY ACTIVATION LOGIC (bugfix for user-to-user reply spam) ===
-    # Design principle (conservative):
-    # - Mention in current message ΓåÆ always wake
-    # - Reply directly to one of *our* previous messages ΓåÆ always wake
-    # - Reply to *someone else* ΓåÆ only wake on *very strong* directed signals:
-    #     * explicit visual intent (the long "edita esta / video de esta / la que generaste" list)
-    #     * strong targeted inquiry phrases (the STRONG_DIRECTED_KEYWORDS)
-    #     * explicit bot name mention in the reply text
-    #
-    # The broad GENERAL_REPLY_INQUIRY_KEYWORDS ("esto", "el anterior", "qu├⌐ opinas", etc.)
-    # are deliberately *excluded* from activation. They only influence context richness
-    # after we have already decided to respond.
+    # Activation: @mention, reply-to-bot, reply-to-image, or strong directed inquiry.
+    # Plain user-to-user text replies stay silent — Grok handles intent when addressed.
+    referenced_has_images = False
+    if referenced:
+        referenced_has_images = any(
+            getattr(a, "content_type", "").startswith("image/")
+            for a in (getattr(referenced, "attachments", []) or [])
+        )
+
     if is_mentioned_now:
         should_activate = True
         logger.info(f"{cid_p}[Activation] Direct @mention in message from {author_display}")
@@ -207,15 +181,15 @@ async def _resolve_referenced_and_activation(
         if is_reply_to_bot:
             should_activate = True
             logger.info(f"{cid_p}[Activation] Direct reply to bot's own previous message from {author_display}")
-        elif explicit_visual_reply_intent:
+        elif referenced_has_images or explicit_visual_reply_intent:
             should_activate = True
-            logger.info(f"{cid_p}[Activation] Reply to other + explicit visual intent (image/video follow-up) from {author_display}")
+            logger.info(f"{cid_p}[Activation] Reply to other + image referent from {author_display}")
         elif _has_strong_directed_reply_intent(message.content or ""):
             should_activate = True
-            logger.info(f"{cid_p}[Activation] Reply to other + strong directed inquiry / bot name from {author_display}")
+            logger.info(f"{cid_p}[Activation] Reply to other + strong directed inquiry from {author_display}")
         else:
             should_activate = False
-            logger.info(f"{cid_p}[Groksito] Ignoring reply from {author_display} to another user (plain user-to-user reply, no mention, not to bot, no strong directed signal)")
+            logger.info(f"{cid_p}[Groksito] Ignoring reply from {author_display} to another user (no mention, not to bot, no image/strong signal)")
     else:
         should_activate = False
         if not is_mentioned_now:

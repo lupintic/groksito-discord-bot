@@ -125,265 +125,42 @@ def _build_native_search_tools(
     has_attached_images: bool,
 ) -> list[dict]:
     """
-    Builds the native xAI web_search + x_search tool schemas (with optional image capabilities).
+    Build native xAI web_search + x_search tool schemas.
 
-    PHILOSOPHY (maximum nativeness, minimal heuristics, token efficiency):
-    - On first-turn "normal" and "rich" queries: offer native search tools BROADLY by default
-      (web_search for fresh info; x_search only on clear X/Twitter signals — see below).
-      This lets Grok itself decide (using its judgment + the improved SYSTEM_PROMPT and rich
-      tool descriptions we provide) whether it actually needs fresh/current information or
-      can answer from training knowledge.
-    - The primary control for *whether any native search schema is sent at all* is context_need
-      (casual/minimal/image_gen -> zero; normal/rich -> consider). Light predicates (post #24)
-      + has_x_link_intent determine tier for schema presence; the model decides actual usage.
-      There are *no* heuristics that decide *whether the model should call* a search; only which
-      schemas to declare (to avoid shipping heavy descriptions for irrelevant tools).
-    - Strict laziness preserved: ZERO native search tools on "casual", "minimal", and "image_gen"
-      turns (and pure image gen cases). This keeps prompt size small where search is unlikely needed.
-    - The model (via Responses API + our prompt/descs) does the real decision of *when* to call
-      and *how to synthesize results*.
-    - web_search and x_search are offered *conditionally/independently*: general fresh -> web_search;
-      only clear X signals -> x_search. This saves the cost of the unused tool's description
-      (~90-95 tokens) on many turns.
-    - x_search offering is deliberately (and iteratively) STRICTER (clear X/Twitter signals only)
-      to reduce how often its schema + potential heavy result payloads are injected on normal turns.
-      This pass further removed remaining noisy terms (see signal comment below). Grok can still
-      fall back to web_search (or knowledge) for marginal social queries. This is the main lever
-      for the "reduce x_search offers" goal without losing nativeness.
-
-    We include focused, efficiency-oriented descriptions in the schemas so Grok knows exactly
-    the purpose of each, when to use which, and — critically — how to use results concisely.
-    Combined with SYSTEM_PROMPT, this keeps behavior native while cutting average tokens.
-
-    Continuation turns re-use whatever was decided on first turn (kept as-is for minimalism on custom side).
+    Prompt-driven philosophy (#48): on normal/rich addressed turns, offer both native
+    search tools and let Grok decide when to call them. Skip only on ultra-light paths
+    (casual/minimal/image_gen) where search is unlikely to help.
     """
-    # Strong laziness for nativeness: never offer search tools on the lightest turns.
-    # This now also covers "minimal" so that even "minimal" turns with time words
-    # get zero native tools (very low context + no search schemas).
     if context_need in ("casual", "minimal", "image_gen"):
         return []
 
-    # Pure image generation almost never needs external search (even if query text had fresh-ish words).
-    # This is an additional safety net (in addition to the image_gen context_need path).
     try:
         if is_pure_image_generation_request(query_text) and not has_attached_images:
             return []
     except Exception:
         pass
 
-    # Normalize for lightweight signal detection (to decide web vs x independently, saving tokens
-    # by not sending unnecessary tool descriptions when only one is relevant).
-    q = unicodedata.normalize("NFKD", (query_text or "").lower())
-    q = "".join(c for c in q if not unicodedata.combining(c))
+    web_tool: dict = {
+        "type": "web_search",
+        "description": (
+            "Search the web for current facts: news, prices, weather, sports, live data, recent events. "
+            "Skip for timeless knowledge the model already has."
+        ),
+    }
 
-    # STRICTER X-SPECIFIC SIGNAL DETECTION (refinement pass for even fewer x_search offers):
-    # Goal: offer the x_search tool schema (and its result payloads) ONLY on *clear, unambiguous*
-    # signals of X/Twitter intent. On normal turns this saves shipping the (lengthy) x_search
-    # description + reduces likelihood the model will invoke the often-verbose X results tool
-    # on marginal social/general "what do people think" queries (where web_search or knowledge
-    # suffice).
-    #
-    # This is a *further* tightening on top of prior cleanup:
-    # - Dropped "twit" entirely (false-positives on "twitch" streaming discussions + generic
-    #   short "twit" / witty comments unrelated to X).
-    # - Replaced standalone "tendencia" with "en tendencia" ( "tendencia" is extremely common
-    #   for any trend: design, market, fashion, crypto; "en tendencia" is the idiomatic X
-    #   "trending" phrasing).
-    # - Removed the broad social-listening group ("qué dicen", "que dicen", "qué se dice",
-    #   "opiniones en", "reacciones en"). These are *very* noisy in Spanish: they match
-    #   "qué dicen los expertos", "que dicen las noticias", "opiniones en el foro",
-    #   "reacciones en el video", "qué se dice de la película", "qué dicen en la calle", etc.
-    #   — almost never X-specific.
-    # - Coverage for legitimate X social queries is preserved *without* the broad terms:
-    #     * "qué dicen en x...", "reacciones en x", "opiniones en x", "qué se dice en x" →
-    #       caught by the "en x" guard below.
-    #     * "... en twitter", "... en x.com" → hit "twitter"/"x.com".
-    #     * Any mention of "tweet"/"tweets", "trending", "post en x", "este tweet" etc. still work.
-    # - Still a flat list + the single existing bounded guard. Simple, non-brittle, no regex
-    #   or per-word tokenization. "Nativo" preserved: Grok decides calls; we only control
-    #   expensive schema presence. Signals used *only* for token-saving schema decisions.
-    x_signals = [
-        "tweet",
-        "tweets",  # core X terminology (very strong, safe signal)
-        "x.com",
-        "twitter.com",
-        "twitter",  # direct links + mentions (covers "en twitter" etc.)
-        "trending",  # English "trending" is highly X-specific
-        "en tendencia",  # precise Spanish X phrasing (replaces noisy bare "tendencia")
-        "este tweet",
-        "el tweet",
-        "tweet de",
-        "tweets sobre",  # tweet-specific reply phrasing
-        "post en x",
-        "posts en x",
-        "post de x",  # only qualified "post" that mention the platform
-        # (broad social phrases removed; see comment above for rationale + how X cases remain covered)
-    ]
-    include_x = any(sig in q for sig in x_signals)
+    x_tool: dict = {
+        "type": "x_search",
+        "description": (
+            "Search X (Twitter) for posts, trends, and social reactions. "
+            "Use when the user cares about X activity or shared x.com links."
+        ),
+    }
 
-    # Extra guard for the ambiguous "en x" platform reference (Spanish "en X" = on X).
-    # This guard is now *even more important* because we removed the broad "qué dicen / opiniones en / reacciones en"
-    # from the main list; many natural X queries ("qué dicen en x", "reacciones en x al anuncio", "opiniones en x")
-    # will land here.
-    # Only treat as X signal if "en x" occurrence is not part of common time/quantity false-positives.
-    # Uses bounded (non-alpha adjacent) matching so "ahora" does not match "hora", "paso" etc.
-    if not include_x and "en x" in q:
-        false_time_or_other = [
-            "minuto",
-            "minutos",
-            "hora",
-            "horas",
-            "dia",
-            "días",
-            "día",
-            "segundo",
-            "segundos",
-            "vez",
-            "veces",
-            "ocasión",
-            "version",
-            "versión",
-            "formato",
-            "punto",
-            "caso",
-        ]
+    if has_visual_intent or has_attached_images or _detect_visual_intent(query_text):
+        web_tool["enable_image_search"] = True
+        web_tool["enable_image_understanding"] = True
 
-        def _has_bounded(needle: str, hay: str) -> bool:
-            if needle not in hay:
-                return False
-            idx = hay.find(needle)
-            before = hay[idx - 1] if idx > 0 else " "
-            after = hay[idx + len(needle)] if idx + len(needle) < len(hay) else " "
-            # true only if the occurrence is bounded by non-letters (word-like boundary)
-            return not before.isalpha() and not after.isalpha()
-
-        if not any(_has_bounded(fp, q) for fp in false_time_or_other):
-            # Accept as X platform signal (weak but useful). This is the main path for
-            # "qué dicen en x ...", "reacciones/opiniones en x", "novedades en x", "pasa en x" etc.
-            # (Combined with has_general it usually still offers web too; pure cases drop web.)
-            include_x = True
-
-    # For broad offering on normal/rich: include web by default.
-    # But for pure X-specific (no general fresh keywords) and not rich: offer only x_search to save
-    # the web description tokens (~90 tokens).
-    general_keywords = [
-        "hoy",
-        "ahora",
-        "actual",
-        "última",
-        "ayer",
-        "anoche",
-        "reciente",
-        "noticia",
-        "noticias",
-        "news",
-        "breaking",
-        "precio",
-        "precios",
-        "dólar",
-        "busca",
-        "search",
-        "clima",
-        "partido",
-        "en vivo",
-        "pasó",
-        "paso",
-        "latest",
-        "recientes",
-        "controvers",
-        "polémica",
-        "problemas",
-        "issues",
-        "drama",
-        "scandal",
-        "qué pasó",
-        "what happened",
-        "recent",
-    ]
-    has_general = any(kw in q for kw in general_keywords)
-    include_web = True
-    if include_x and not has_general and context_need != "rich":
-        include_web = False
-
-    web_tool = None
-    x_tool = None
-
-    if include_web:
-        web_tool = {
-            "type": "web_search",
-            "description": (
-                "Search the web for up-to-date information (news, prices e.g. USD, weather, sports, recent events, "
-                "changing data). Valuable when the query benefits from facts that may have changed since training or require current context (live scores, prices, breaking developments, weather, recent occurrences). "
-                "For timeless or stable topics (definitions, history, math, code, general explanations) direct knowledge or reasoning is often sufficient and faster. Choose search when freshness or recency is likely to improve the answer's usefulness.\n\n"
-                "EFFICIENT USAGE (MANDATORY - this directly reduces tokens on every search turn):\n"
-                "- MUST craft the *narrowest, most specific* query possible that targets exactly the fact (e.g. "
-                "'dólar blue hoy Argentina site:ambito.com' or 'resultado boca river live' — never broad 'dólar' or 'partido').\n"
-                "- From results: extract and retain *AT MOST the 1-2 most relevant facts or data points*. "
-                "Immediately discard ads, nav, related stories, full pages, boilerplate, and anything not directly answering.\n"
-                "- FINAL ANSWER SYNTHESIS RULE (critical): provide the key relevant facts in natural, complete prose (a short paragraph is appropriate and useful for substantive/fresh topics). Stay crisp and direct, no quoting raw results, no meta 'I searched', optional (source) only when credibility key. Goal remains low bloat but usefulness first for normal/medium questions.\n"
-                "Internal reasoning over results must stay minimal and invisible to user. Goal: freshest facts, lowest possible token cost."
-            ),
-        }
-
-    if include_x:
-        x_tool = {
-            "type": "x_search",
-            "description": (
-                "Search posts, threads, opinions and recent activity on X (Twitter). Useful for real-time social reactions, trending discussions, profiles, X-specific commentary, or content referenced via x.com links that general web results may not surface well. "
-                "Provides social pulse and timely sentiment when that context adds value beyond standard web search or built-in knowledge.\n\n"
-                "EFFICIENT USAGE (MANDATORY - X result sets are especially verbose; this is a major token lever):\n"
-                "- Focus on queries with clear connection to X activity or shared posts.\n"
-                "- From results: keep *AT MOST 1-2 posts/reactions* (the most on-point). Discard noise, duplicates, low-signal replies, full threads, and timelines immediately.\n"
-                "- FINAL ANSWER SYNTHESIS RULE (strict): provide the key relevant facts or sentiment in natural, complete prose (short paragraph fine for meaty fresh topics); stay crisp, no quoting raw results/posts, no meta 'I searched', optional (source) only when key. Usefulness first for normal questions while avoiding bloat.\n"
-                "Combine with web_search only when both genuinely add unique value. Internal use of results must be invisible."
-            ),
-        }
-
-    enable_image_search = False
-    enable_image_understanding = False
-
-    visual_signal = (
-        has_visual_intent or has_attached_images or _detect_visual_intent(query_text)
-    )
-
-    if visual_signal:
-        enable_image_search = True
-        enable_image_understanding = True
-    elif context_need == "rich":
-        # On rich turns we are more generous with image understanding for search results
-        enable_image_understanding = True
-
-        qq = (query_text or "").lower()
-        if any(
-            kw in qq
-            for kw in (
-                "imágenes",
-                "imagenes",
-                "fotos",
-                "pictures",
-                "images of",
-                "muéstrame",
-                "show me images",
-                "fotos de",
-                "imágenes de",
-                "busca imágenes",
-            )
-        ):
-            enable_image_search = True
-
-    if include_web:
-        if enable_image_search:
-            web_tool["enable_image_search"] = True
-        if enable_image_understanding:
-            web_tool["enable_image_understanding"] = True
-
-    tools = []
-    if include_web:
-        tools.append(web_tool)
-    if include_x:
-        tools.append(x_tool)
-
-    return tools
+    return [web_tool, x_tool]
 
 
 def _infer_tools_set_name(
