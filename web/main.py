@@ -46,7 +46,7 @@ if str(BOT_SRC) not in sys.path:
     sys.path.insert(0, str(BOT_SRC))
 
 # Unified safe .env handling (single source of truth shared with setup.py)
-from groksito_discord.env_utils import (
+from groksito_discord.utils.env_utils import (
     safe_write_env,
     parse_env_file,
     parse_env_lines,
@@ -328,7 +328,7 @@ OAUTH_RELATED_KEYS: list[str] = [
 # We keep a tiny local reference only for any code that directly referenced ENV_LINE_RE.
 # All new .env writes MUST go through safe_write_env (imported above).
 try:
-    from groksito_discord.env_utils import ENV_LINE_RE  # re-export for any local direct use
+    from groksito_discord.utils.env_utils import ENV_LINE_RE  # re-export for any local direct use
 except Exception:
     ENV_LINE_RE = re.compile(
         r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s#]*))?\s*(?:#\s*(.*))?$',

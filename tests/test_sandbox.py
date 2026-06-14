@@ -13,12 +13,12 @@ from unittest.mock import patch
 
 import pytest
 
-from groksito_discord.sandbox import (
+from groksito_discord.llm.sandbox import (
     run_code_execution,
     run_playwright_browser,
     _run_docker_command,
 )
-from groksito_discord.tools import (
+from groksito_discord.llm.tools import (
     get_tools_for_request,
     get_skill_specific_custom_schemas,
 )

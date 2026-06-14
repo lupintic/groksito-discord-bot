@@ -29,7 +29,7 @@ that lived in setup.py and web/main.py (and the standalone test copy).
 Drift between those copies was a major contributor to the duplication bugs.
 
 Usage (preferred):
-    from src.groksito_discord.env_utils import (
+    from src.groksito_discord.utils.env_utils import (
         safe_write_env, parse_env_file, parse_env_lines,
         deduplicate_env_file, backup_env, CRITICAL_KEYS, PROTECTED_KEYS,
     )

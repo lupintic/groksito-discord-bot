@@ -7,7 +7,7 @@ Usage:
     python -m groksito_discord   (after proper packaging)
 """
 
-from .bot import run
+from .main import run
 
 if __name__ == "__main__":
     run()

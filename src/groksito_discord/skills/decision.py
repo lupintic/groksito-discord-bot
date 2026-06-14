@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
 logger = logging.getLogger("groksito.skills.decision")
 

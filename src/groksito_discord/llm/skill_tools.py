@@ -22,7 +22,7 @@ import asyncio
 import logging
 from typing import Any
 
-from .correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
 logger = logging.getLogger("groksito.tools")
 
@@ -408,11 +408,11 @@ async def _test_skill_proposal(
     """
     try:
         from openai import AsyncOpenAI
-        from .config import settings as _settings
+        from ..config import settings as _settings
 
         bearer = None
         try:
-            from .grok_oauth import get_grok_bearer as _get_grok_bearer
+            from ..core.grok_oauth import get_grok_bearer as _get_grok_bearer
             if _get_grok_bearer:
                 bearer = _get_grok_bearer()
         except Exception:
@@ -525,7 +525,7 @@ def _derive_test_query(reason: str, name: str, instructions: str = "") -> str:
 async def handle_create_skill(args: dict[str, Any], original_message: Any = None) -> str:
     """Handler for the create_skill meta tool."""
     try:
-        from .skills.skill_registry import get_skill_registry
+        from ..skills.skill_registry import get_skill_registry
         reg = get_skill_registry()
 
         sk_name = str(args.get("name", "Custom Skill")).strip()[:100] or "Custom Skill"
@@ -621,7 +621,7 @@ async def handle_get_recent_context(args: dict[str, Any], original_message: Any 
         logger.info(f"{cid_prefix()}[DECISION] model chose get_recent_context (explicit tool decision to fetch recent context)")
         ch = getattr(original_message, "channel", None)
         ch_id = getattr(ch, "id", 0) if ch else 0
-        from .context.context_summarizer import summarize_recent_conversation
+        from ..context.context_summarizer import summarize_recent_conversation
         summary = await summarize_recent_conversation(ch_id)
         if summary:
             return f"RECENT CHANNEL CONTEXT SUMMARY:\n{summary}\n\nUse this to maintain conversational coherence or answer references to prior messages."
@@ -634,7 +634,7 @@ async def handle_use_skill(args: dict[str, Any], original_message: Any = None) -
     """Handler for the use_skill meta tool."""
     try:
         logger.info(f"{cid_prefix()}[DECISION] model chose use_skill (delegating to approved skill)")
-        from .skills.skill_registry import get_skill_registry
+        from ..skills.skill_registry import get_skill_registry
         reg = get_skill_registry()
         ident = str(args.get("skill", "") or args.get("skill_name", "") or args.get("skill_id", "")).strip()
         skill = None
@@ -662,7 +662,7 @@ async def handle_use_skill(args: dict[str, Any], original_message: Any = None) -
 async def handle_edit_skill(args: dict[str, Any], original_message: Any = None) -> str:
     """Handler for the edit_skill meta tool."""
     try:
-        from .skills.skill_registry import get_skill_registry
+        from ..skills.skill_registry import get_skill_registry
         reg = get_skill_registry()
 
         ident = str(args.get("skill", "") or args.get("skill_name", "") or args.get("skill_id", "")).strip()

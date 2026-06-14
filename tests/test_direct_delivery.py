@@ -13,7 +13,7 @@ No network calls are made.
 
 import pytest
 
-from groksito_discord.image_delivery import DIRECT_DELIVERY_PERFORMED
+from groksito_discord.media.delivery import DIRECT_DELIVERY_PERFORMED
 
 
 def test_direct_delivery_performed_is_singleton_sentinel():

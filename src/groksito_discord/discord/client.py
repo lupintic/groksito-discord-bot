@@ -36,7 +36,7 @@ import time
 from collections import defaultdict, deque
 from typing import Any, Deque, Optional
 
-from .correlation import (
+from ..utils.correlation import (
     cid_prefix,
     generate_correlation_id,
     set_correlation_id,
@@ -52,22 +52,22 @@ try:
 except Exception:
     pass
 
-from .config import settings
-from .response_safety import safe_reply as _safe_reply
+from ..config import settings
+from ..core.safety import safe_reply as _safe_reply
 
 # Steam integration (extracted in Phase 1 for client hygiene).
 # All data fetching, game resolution, and scraping logic lives in
-# src/groksito_discord/integrations/steam.py. Behavior is identical.
+# src/groksito_discord/discord/integrations/steam.py. Behavior is identical.
 from .integrations import steam
 
 # Centralized text utilities (Phase 2). Replaces inline URL extraction that
 # duplicated logic from conversation.py.
-from .utils.text import extract_urls_from_text
+from ..utils.text import extract_urls_from_text
 
 # Dedicated /audio slash (reuses 100% of audio_handler.py for TTS + fancy voice delivery
 # via the image_delivery direct-delivery tracker; no duplication of generation or bubble logic).
-from .image_delivery import register_image_request
-from .media.audio_handler import (
+from ..media.delivery import register_image_request
+from ..media.audio_handler import (
     _tool_generate_audio,
     prepare_text_from_interaction,
 )
@@ -649,9 +649,9 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
     register_slash_commands(tree, _discord_client)
 
     # Lazy import of conversational stack (keeps things clean)
-    from . import context
+    from .. import context
     # No custom memory system at all (removed for 100% Grok nativeness)
-    from .conversation import (
+    from ..core.conversation import (
         _resolve_referenced_and_activation,
         _build_referenced_context,
         _harvest_vision_images,
@@ -684,7 +684,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
         # in messages the bot sees. This is the efficient path for servers with 100-200+ emotes.
         # Data lives in data/emoji_knowledge.json.
         try:
-            from . import emoji_registry
+            from ..utils import emoji_registry
             asyncio.create_task(emoji_registry.scan_all_accessible_emojis(_discord_client))
             logger.info("[Emoji] Background emote metadata scan launched (vision + usage ranking is lazy on real use)")
         except Exception as emoji_err:
@@ -692,7 +692,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
 
         # Write initial heartbeat + supporting snapshots so the web dashboard has good data immediately.
         try:
-            from .health import (
+            from ..core.health import (
                 write_bot_heartbeat,
                 write_bot_guilds_snapshot,
                 write_bot_stats,
@@ -718,7 +718,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
     @_discord_client.event
     async def on_disconnect():
         try:
-            from .health import write_bot_heartbeat
+            from ..core.health import write_bot_heartbeat
             write_bot_heartbeat(connected=False)
         except Exception:
             pass
@@ -726,7 +726,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
     @_discord_client.event
     async def on_resumed():
         try:
-            from .health import (
+            from ..core.health import (
                 write_bot_heartbeat,
                 write_bot_guilds_snapshot,
                 write_bot_stats,
@@ -942,7 +942,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
                 await asyncio.sleep(35)
                 if _discord_client and getattr(_discord_client, "is_ready", lambda: False)():
                     try:
-                        from .health import (
+                        from ..core.health import (
                             write_bot_heartbeat,
                             write_bot_guilds_snapshot,
                             write_bot_stats,

@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 from .skill_registry import get_skill_registry, Skill
 
 logger = logging.getLogger("groksito.skills.executor")

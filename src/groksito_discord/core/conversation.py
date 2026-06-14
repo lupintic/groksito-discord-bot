@@ -14,18 +14,18 @@ import logging
 import time
 from typing import Any
 
-from .correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
-from . import context
-from .response_safety import safe_reply
+from .. import context
+from .safety import safe_reply
 # No custom memory (fully removed for maximum nativeness)
-from .image_delivery import DIRECT_DELIVERY_PERFORMED
-from .llm_utils import _detect_image_creation_intent
+from ..media.delivery import DIRECT_DELIVERY_PERFORMED
+from ..llm.llm_utils import _detect_image_creation_intent
 
 # Centralized text utilities (Phase 2). Aliases preserve the original private
 # names used throughout this file so that no call sites inside conversation.py
 # needed to change.
-from .utils.text import (
+from ..utils.text import (
     extract_urls_from_text as _extract_urls_from_text,
     extract_x_links as _extract_x_links,
     extract_image_urls_from_text as _extract_image_urls_from_text,
@@ -34,7 +34,7 @@ from .utils.text import (
 # Centralized intent/keyword data (Phase 5). We import with the original names
 # (including the private _has_* aliases) so that the rest of this file and all
 # its internal call sites require zero modifications.
-from .intents import (
+from .intent import (
     STRONG_DIRECTED_KEYWORDS,
     GENERAL_REPLY_INQUIRY_KEYWORDS,
     _has_strong_directed_reply_intent,
@@ -549,7 +549,7 @@ async def _invoke_groksito(
     cid_p = cid_prefix()
     # Lazy import to avoid potential circular import issues at startup
     try:
-        from .llm import call_grok_with_tools
+        from ..llm import call_grok_with_tools
     except Exception as import_err:
         logger.error(f"{cid_p}Failed to import Groksito LLM modules: {import_err}")
         await safe_reply(message, "Lo siento, estoy teniendo problemas para inicializar mi cerebro en este momento.", mention_author=False)

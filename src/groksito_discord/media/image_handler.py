@@ -36,9 +36,9 @@ from typing import Any, Optional
 
 import httpx
 
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 from ..config import settings
-from ..image_delivery import consume_image_request, register_image_request
+from .delivery import consume_image_request, register_image_request
 
 # Bearer resolution (OAuth preferred with refresh, fallback to key)
 try:

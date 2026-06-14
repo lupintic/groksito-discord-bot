@@ -20,7 +20,7 @@ _context_mod = None
 def _get_context():
     global _context_mod
     if _context_mod is None:
-        from . import context as _ctx
+        from .. import context as _ctx
         _context_mod = _ctx
     return _context_mod
 
