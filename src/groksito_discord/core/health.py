@@ -186,11 +186,11 @@ def get_health_status() -> dict[str, Any]:
     }
 
     modules_to_check = [
-        "client",
-        "conversation",
+        "discord.client",
+        "core.conversation",
         "context",
-        "media_tools",
-        "tools",
+        "llm.media_tools",
+        "llm.tools",
         "llm",
     ]
 

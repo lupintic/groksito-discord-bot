@@ -464,7 +464,7 @@ async def _harvest_vision_images(
             try:
                 ch = getattr(getattr(message, "channel", None), "id", None)
                 if ch:
-                    from .context import get_recent_channel_messages
+                    from ..context import get_recent_channel_messages
                     recent_msgs = get_recent_channel_messages(ch, limit=8)
                     added = 0
                     now = time.time()
@@ -518,7 +518,7 @@ async def _harvest_vision_images(
     # (or web_search) for reliable post content + media. Good images (attachments, grok gens, stable user image links)
     # are preserved for native vision.
     raw_count = len(image_urls)
-    from .utils.text import filter_unreliable_vision_urls
+    from ..utils.text import filter_unreliable_vision_urls
     image_urls = filter_unreliable_vision_urls(image_urls)
     if len(image_urls) < raw_count:
         logger.info(f"{cid_p}[Vision] Filtered {raw_count - len(image_urls)} unreliable image URL(s) (X/Twitter previews or Discord link-embed proxies) to prevent 404 on vision; using text + x_search fallback")
