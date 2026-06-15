@@ -146,7 +146,8 @@ async def _resolve_referenced_and_activation(
         # even for broader inquiries. The broadening no longer affects wake-up decisions.
         has_x_link_intent = has_specific_x or has_general_reply_inquiry
 
-        # Replying to content with image/video attachments → vision/media tools available.
+        # PR #49 review: wake on image *or* video referents (not just image/* MIME).
+        # Sets explicit_visual_reply_intent so vision/media tools are available downstream.
         if referenced_has_media_attachments(referenced):
             explicit_visual_reply_intent = True
             logger.info(f"{cid_p}[Reply] Reply to message with image/video attachment(s)")
@@ -162,8 +163,8 @@ async def _resolve_referenced_and_activation(
         if not (message.reference and message.reference.message_id):
             logger.info(f"{cid_p}[Mention] Recent referent / inquiry language on direct mention (ensuring recent context + possible vision for referent)")
 
-    # Activation: @mention, reply-to-bot, reply-to-media, or strong directed inquiry.
-    # Plain user-to-user text replies stay silent — Grok handles intent when addressed.
+    # Activation: @mention, reply-to-bot, reply-to-media (image/video), or strong directed inquiry.
+    # Plain user-to-user text-only replies stay silent — Grok handles intent when @mentioned.
     referenced_has_media = referenced_has_media_attachments(referenced)
 
     if is_mentioned_now:
@@ -181,7 +182,7 @@ async def _resolve_referenced_and_activation(
             logger.info(f"{cid_p}[Activation] Reply to other + strong directed inquiry from {author_display}")
         else:
             should_activate = False
-            logger.info(f"{cid_p}[Groksito] Ignoring reply from {author_display} to another user (no mention, not to bot, no image/strong signal)")
+            logger.info(f"{cid_p}[Groksito] Ignoring reply from {author_display} to another user (no mention, not to bot, no media/strong signal)")
     else:
         should_activate = False
         if not is_mentioned_now:

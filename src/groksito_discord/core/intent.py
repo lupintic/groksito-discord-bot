@@ -218,6 +218,9 @@ GENERAL_REPLY_INQUIRY_KEYWORDS = [
     "lo anterior",
 ]
 
+# Discord attachment signals for reply-to-media activation (PR #49 review).
+# content_type is primary; filename extension is a fallback when Discord reports
+# video as application/octet-stream.
 _MEDIA_CONTENT_TYPE_PREFIXES = ("image/", "video/")
 _MEDIA_FILENAME_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv", ".m4v")
 
@@ -235,6 +238,7 @@ def referenced_has_media_attachments(message: Any | None) -> bool:
         content_type = (getattr(att, "content_type", "") or "").lower()
         if any(content_type.startswith(prefix) for prefix in _MEDIA_CONTENT_TYPE_PREFIXES):
             return True
+        # Fallback: some video uploads lack a video/* MIME type.
         filename = (getattr(att, "filename", "") or "").lower()
         if any(filename.endswith(ext) for ext in _MEDIA_FILENAME_EXTENSIONS):
             return True

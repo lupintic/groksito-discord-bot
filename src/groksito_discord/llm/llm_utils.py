@@ -140,6 +140,8 @@ def _build_native_search_tools(
     except Exception:
         pass
 
+    # Concise schemas (prompt-driven #48); one-line efficiency hints mirror SYSTEM_PROMPT
+    # without the old lengthy "MANDATORY" blocks (PR #49 review — monitor synthesis quality).
     web_tool: dict = {
         "type": "web_search",
         "description": (

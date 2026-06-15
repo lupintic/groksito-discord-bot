@@ -155,7 +155,12 @@ def _guess_filename(url: str, kind: str, index: int = 0) -> str:
 
 
 async def _download_url(url: str) -> bytes | None:
-    """Download a transient xAI media URL with simple retry + backoff."""
+    """Download a transient xAI media URL with simple retry + backoff.
+
+    xAI CDN URLs are short-lived; a single flaky fetch would otherwise force a
+    URL-in-text fallback instead of a Discord attachment (PR #49 review).
+    """
+    # At least 2 attempts; cap to avoid long stalls on permanently dead URLs.
     max_attempts = max(2, min(getattr(settings, "api_max_retries", 3), 4))
     last_err: Exception | None = None
 
