@@ -132,6 +132,36 @@ class RateLimiter:
 
 
 # =============================================================================
+# Steam embed builder (shared by /steamchart, /stmchr, /topgames)
+# =============================================================================
+def _build_steam_game_embeds(games: list[dict[str, Any]]) -> list[discord.Embed]:
+    """Build one Discord embed per game from ``get_steam_game_data()`` results."""
+    embeds: list[discord.Embed] = []
+    for g in games:
+        name = g["matched_name"]
+        appid = g["appid"]
+        player_count = g.get("player_count")
+        image_url = g.get("image_url")
+        color = steam.get_game_color(name)
+        if player_count is not None:
+            description = f"**{player_count:,}** jugadores ahora"
+            if g.get("player_count_source") == "demo" and "demo" not in name.lower():
+                description += " (vía Demo en Steam)"
+        else:
+            description = "Conteo de jugadores no disponible en Steam Charts ahora mismo."
+        embed = discord.Embed(
+            title=name,
+            description=description,
+            color=color,
+            url=f"https://store.steampowered.com/app/{appid}/",
+        )
+        thumb_url = image_url or f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"
+        embed.set_thumbnail(url=thumb_url)
+        embeds.append(embed)
+    return embeds
+
+
+# =============================================================================
 # Slash Command Registration (Phase 3)
 # =============================================================================
 def register_slash_commands(
@@ -190,81 +220,19 @@ def register_slash_commands(
         await interaction.response.defer(thinking=True, ephemeral=False)
 
         if not juegos or not juegos.strip():
-            # Sensible default list (popular ones users commonly ask about)
             juegos = "path of exile 2, black desert, crimson desert, lost ark"
 
-        terms = [t.strip() for t in juegos.split(",") if t.strip()][:8]
-
-        # Resolve provided terms (supports custom games, unlike the fixed /stmchr list).
-        # Now uses improved fuzzy + dynamic Steam search so "dota 2", "cs2", typos, etc. work.
-        resolved_games: list[tuple[str, int]] = []
-        for term in terms:
-            resolved = await steam._resolve_steam_game(term)
-            if resolved:
-                resolved_games.append(resolved)
-
-        if not resolved_games:
-            await interaction.followup.send(
-                "No pude reconocer ning├║n juego con ese nombre. "
-                "Prueba con 'dota 2', 'cs2', 'counter strike 2', 'path of exile 2' o similar. "
-                "O usa /stmchr para la lista fija de siempre."
-            )
-            return
-
-        # Fetch player counts + best available thumbnail in parallel (same as /stmchr)
-        meta: list[tuple[str, int]] = []
-        count_tasks = []
-        thumb_tasks = []
-        for disp, aid in resolved_games:
-            meta.append((disp, aid))
-            count_tasks.append(steam._get_steam_player_counts(aid))
-            thumb_tasks.append(steam._resolve_steam_thumb(aid))
-
-        counts_results, thumb_results = await asyncio.gather(
-            asyncio.gather(*count_tasks, return_exceptions=True),
-            asyncio.gather(*thumb_tasks, return_exceptions=True),
-        )
-
-        games_data = []
-        for (disp, aid), count_res, thumb_res in zip(meta, counts_results, thumb_results):
-            if isinstance(count_res, Exception):
-                continue
-            current = count_res.get("current") if isinstance(count_res, dict) else None
-            if current is not None:
-                thumb = None
-                if not isinstance(thumb_res, Exception):
-                    thumb = thumb_res
-                games_data.append(
-                    {
-                        "name": disp,
-                        "current": current,
-                        "app_id": aid,
-                        "thumb": thumb,
-                    }
-                )
+        games_data = await steam.get_steam_game_data(juegos, max_games=8)
 
         if not games_data:
-            await interaction.followup.send("No se pudo obtener datos de Steam Charts en este momento.")
+            await interaction.followup.send(
+                "No pude reconocer ningún juego con ese nombre en Steam. "
+                "Prueba el nombre exacto como aparece en la tienda (ej. 'Embers of the Uncrowned', "
+                "'dota 2', 'counter-strike 2'). O usa /stmchr para la lista fija de siempre."
+            )
             return
 
-        # Sort by current players, highest first (exactly like /stmchr for visual consistency)
-        games_data.sort(key=lambda g: g["current"], reverse=True)
-
-        # Build one embed per game ΓÇö identical structure to /stmchr
-        embeds = []
-        for g in games_data:
-            color = steam.get_game_color(g["name"])  # None for games without a curated theme color
-            embed = discord.Embed(
-                title=g["name"],
-                description=f"**{g['current']:,}** jugadores ahora",
-                color=color,
-                url=f"https://store.steampowered.com/app/{g['app_id']}/",
-            )
-            thumb_url = g.get("thumb") or f"https://cdn.cloudflare.steamstatic.com/steam/apps/{g['app_id']}/header.jpg"
-            embed.set_thumbnail(url=thumb_url)
-            embeds.append(embed)
-
-        await interaction.followup.send(embeds=embeds)
+        await interaction.followup.send(embeds=_build_steam_game_embeds(games_data))
 
     # /stmchr ΓÇö always shows the fixed list of 8 games (no parameters needed).
     # One embed per game, sorted by current players (highest first).
@@ -283,58 +251,14 @@ def register_slash_commands(
 
         await interaction.response.defer(thinking=True, ephemeral=False)
 
-        # Fetch player counts + best available thumbnail in parallel
-        # (delegated to the extracted steam integration module)
-        meta: list[tuple[str, int]] = []
-        count_tasks = []
-        thumb_tasks = []
-        for name, aid in steam._STMCHR_GAMES:
-            meta.append((name, aid))
-            count_tasks.append(steam._get_steam_player_counts(aid))
-            thumb_tasks.append(steam._resolve_steam_thumb(aid))
-
-        counts_results, thumb_results = await asyncio.gather(
-            asyncio.gather(*count_tasks, return_exceptions=True),
-            asyncio.gather(*thumb_tasks, return_exceptions=True),
+        games_data = await steam.get_steam_game_data(
+            steam.stmchr_game_names_csv(),
+            preresolved=steam.stmchr_preresolved_map(),
+            max_games=len(steam._STMCHR_GAMES),
         )
 
-        games_data = []
-        for (disp, aid), count_res, thumb_res in zip(meta, counts_results, thumb_results):
-            if isinstance(count_res, Exception):
-                continue
-            current = count_res.get("current") if isinstance(count_res, dict) else None
-            if current is not None:
-                thumb = None
-                if not isinstance(thumb_res, Exception):
-                    thumb = thumb_res
-                games_data.append(
-                    {
-                        "name": disp,
-                        "current": current,
-                        "app_id": aid,
-                        "thumb": thumb,
-                    }
-                )
-
-        # Sort by current players, highest first
-        games_data.sort(key=lambda g: g["current"], reverse=True)
-
-        # Build one embed per game
-        embeds = []
-        for g in games_data:
-            color = steam.get_game_color(g["name"])
-            embed = discord.Embed(
-                title=g["name"],
-                description=f"**{g['current']:,}** jugadores ahora",
-                color=color,
-                url=f"https://store.steampowered.com/app/{g['app_id']}/",
-            )
-            thumb_url = g.get("thumb") or f"https://cdn.cloudflare.steamstatic.com/steam/apps/{g['app_id']}/header.jpg"
-            embed.set_thumbnail(url=thumb_url)
-            embeds.append(embed)
-
-        if embeds:
-            await interaction.followup.send(embeds=embeds)
+        if games_data:
+            await interaction.followup.send(embeds=_build_steam_game_embeds(games_data))
         else:
             await interaction.followup.send("No se pudo obtener datos de Steam Charts en este momento.")
 
@@ -357,66 +281,25 @@ def register_slash_commands(
 
         await interaction.response.defer(thinking=True, ephemeral=False)
 
-        # Get the live top list (name + app_id) from steamcharts.com/top
         top_list = await steam.get_top_steam_games(10)
         if not top_list:
             await interaction.followup.send("No se pudo obtener la lista de top juegos en este momento.")
             return
 
-        # Fetch player counts + best available thumbnail in parallel (same pattern as /stmchr)
-        meta: list[tuple[str, int]] = []
-        count_tasks = []
-        thumb_tasks = []
-        for name, aid in top_list:
-            meta.append((name, aid))
-            count_tasks.append(steam._get_steam_player_counts(aid))
-            thumb_tasks.append(steam._resolve_steam_thumb(aid))
+        names_csv = ", ".join(name for name, _ in top_list)
+        preresolved = {name: appid for name, appid in top_list}
 
-        counts_results, thumb_results = await asyncio.gather(
-            asyncio.gather(*count_tasks, return_exceptions=True),
-            asyncio.gather(*thumb_tasks, return_exceptions=True),
+        games_data = await steam.get_steam_game_data(
+            names_csv,
+            preresolved=preresolved,
+            max_games=len(top_list),
         )
-
-        games_data = []
-        for (disp, aid), count_res, thumb_res in zip(meta, counts_results, thumb_results):
-            if isinstance(count_res, Exception):
-                continue
-            current = count_res.get("current") if isinstance(count_res, dict) else None
-            if current is not None:
-                thumb = None
-                if not isinstance(thumb_res, Exception):
-                    thumb = thumb_res
-                games_data.append(
-                    {
-                        "name": disp,
-                        "current": current,
-                        "app_id": aid,
-                        "thumb": thumb,
-                    }
-                )
 
         if not games_data:
             await interaction.followup.send("No se pudo obtener datos de Steam Charts en este momento.")
             return
 
-        # Sort by current players, highest first (defensive; the top list is usually already ordered)
-        games_data.sort(key=lambda g: g["current"], reverse=True)
-
-        # Build one embed per game ΓÇö identical structure to /stmchr
-        embeds = []
-        for g in games_data:
-            color = steam.get_game_color(g["name"])  # None for games not in the curated color list
-            embed = discord.Embed(
-                title=g["name"],
-                description=f"**{g['current']:,}** jugadores ahora",
-                color=color,
-                url=f"https://store.steampowered.com/app/{g['app_id']}/",
-            )
-            thumb_url = g.get("thumb") or f"https://cdn.cloudflare.steamstatic.com/steam/apps/{g['app_id']}/header.jpg"
-            embed.set_thumbnail(url=thumb_url)
-            embeds.append(embed)
-
-        await interaction.followup.send(embeds=embeds)
+        await interaction.followup.send(embeds=_build_steam_game_embeds(games_data))
 
     # /audio — dedicated TTS/voice slash command.
     # - text is optional (for reply-to use case).
@@ -687,6 +570,13 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
             logger.info("[Emoji] Background emote metadata scan launched (vision + usage ranking is lazy on real use)")
         except Exception as emoji_err:
             logger.debug(f"[Emoji] Could not start emote scan (non-fatal): {emoji_err}")
+
+        try:
+            from .integrations import steam as steam_integration
+            asyncio.create_task(steam_integration.warmup_steam_app_list())
+            logger.info("[Steam] Background app list cache warmup launched")
+        except Exception as steam_err:
+            logger.debug(f"[Steam] Could not start app list warmup (non-fatal): {steam_err}")
 
         # Write initial heartbeat + supporting snapshots so the web dashboard has good data immediately.
         try:

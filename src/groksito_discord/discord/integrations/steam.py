@@ -1,27 +1,47 @@
 """
 Steam Charts integration for Groksito.
 
-Provides player count data (current + peaks) and thumbnail resolution for
-the /stmchr and /steamchart slash commands.
-
-This module was extracted during Phase 1 of the professional refactoring
-("Extract Steam Integration + Client Hygiene").
-
-All logic, scraping strategies, headers, regexes, fallback behavior, and
-data structures are preserved **exactly** as they were in client.py.
-No behavioral changes of any kind.
+Shared backend for /steamchart (custom game lookup), /stmchr (fixed list),
+and /topgames (live top). Exposes ``get_steam_game_data()`` as the unified
+entry point for resolving names, fetching player counts, and store images.
 
 The Discord-specific command registration and presentation (embeds, messages,
-guild checks, defer/followup) remain in client.py. This module only owns
-the external data fetching and game resolution concerns.
+guild checks, defer/followup) remain in client.py.
 """
 
 from __future__ import annotations
 
+import asyncio
 import difflib
+import json
+import logging
 import re
+import time
+from pathlib import Path
+from typing import Any
 
 import httpx
+from rapidfuzz import fuzz, process
+
+logger = logging.getLogger(__name__)
+
+try:
+    from ...config import settings as _settings
+    _DATA_DIR: Path = _settings.data_dir
+except Exception:
+    _DATA_DIR = Path("./data")
+
+STEAM_APP_LIST_FILENAME = "steam_app_list.json"
+CACHE_MAX_AGE_SECONDS = 86400  # refresh daily
+FUZZY_MATCH_THRESHOLD = 70
+_MAX_CONCURRENT_STEAM_FETCHES = 5
+# Tokens ignored when requiring overlap between query and fuzzy candidates.
+_MATCH_STOP_WORDS = frozenset(
+    {
+        "the", "of", "a", "an", "and", "or", "for", "in", "on", "at", "to",
+        "game", "edition", "definitive", "classic", "remastered", "remaster",
+    }
+)
 
 
 # =============================================================================
@@ -507,17 +527,30 @@ def _resolve_steam_game_local(term: str) -> tuple[str, int] | None:
     return None
 
 
+def _score_name_match(query: str, candidate: str) -> float:
+    """Score how well a store search result name matches the user query (0.0–1.0)."""
+    q = _normalize_name(query)
+    c = _normalize_name(candidate)
+    if not q or not c:
+        return 0.0
+    if q == c:
+        return 1.0
+    if q in c or c in q:
+        return 0.95
+    return difflib.SequenceMatcher(None, q, c).ratio()
+
+
 async def _search_steam_for_app(term: str) -> tuple[str, int] | None:
     """Dynamic fallback using Steam's public store search + Steam Charts search.
 
-    This is specifically designed to handle brand new games that appear on
-    steamcharts.com even if they are not yet (or not well) indexed in our local list.
+    Designed to resolve *any* Steam game by name, not only our curated list.
     Strategy:
-      1. Try the structured Steam Store search API (good names + AppIDs).
-      2. If that fails, scrape Steam Charts own search (https://steamcharts.com/search)
-         which is the most direct source for "what is currently tracked on steamcharts".
-      3. Validate the candidate by asking the official Steam player count API.
-         If we can get a current player number (even 0), the AppID is real and usable.
+      1. Steam Store search API — primary source; returns real AppIDs for virtually
+         every published title (including new releases not yet on steamcharts.com).
+      2. Steam Charts search page — fallback for titles actively tracked there when
+         store search is inconclusive.
+      3. Store existence check for charts-only hits (player-count API is NOT used for
+         validation: many valid games return result=42 when they have no live stats yet).
     """
     q = term.strip()
     if not q or len(q) < 2:
@@ -527,21 +560,19 @@ async def _search_steam_for_app(term: str) -> tuple[str, int] | None:
     if cache_key in _DYNAMIC_RESOLVE_CACHE:
         return _DYNAMIC_RESOLVE_CACHE[cache_key]
 
-    # --- Strategy 1: Steam Store search API (fast, structured, usually excellent) ---
+    # --- Strategy 1: Steam Store search API (authoritative for any published app) ---
     store_result = await _search_store_api(q)
     if store_result:
-        if await _validate_app_has_players(store_result[1]):
-            _cache_resolution(cache_key, store_result)
-            return store_result
+        _cache_resolution(cache_key, store_result)
+        return store_result
 
-    # --- Strategy 2: Steam Charts search page (best for games actively on steamcharts.com) ---
+    # --- Strategy 2: Steam Charts search page (games actively on steamcharts.com) ---
     charts_result = await _search_steamcharts_search_page(q)
     if charts_result:
-        if await _validate_app_has_players(charts_result[1]):
+        if await _validate_steam_app_exists(charts_result[1]):
             _cache_resolution(cache_key, charts_result)
             return charts_result
 
-    # Both failed or validation failed → cache negative and give up
     _DYNAMIC_RESOLVE_CACHE[cache_key] = None
     return None
 
@@ -553,7 +584,7 @@ def _cache_resolution(cache_key: str, result: tuple[str, int]) -> None:
 
 
 async def _search_store_api(term: str) -> tuple[str, int] | None:
-    """Steam Store public search API."""
+    """Steam Store public search API — pick the best name match among app results."""
     try:
         async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
             resp = await client.get(
@@ -570,12 +601,43 @@ async def _search_store_api(term: str) -> tuple[str, int] | None:
     if not items:
         return None
 
-    top = items[0]
-    app_id = top.get("id")
-    name = top.get("name") or term
-    if isinstance(app_id, int) and app_id > 0:
-        return (name, app_id)
+    query_lower = term.lower()
+    wants_demo = "demo" in query_lower
+    best: tuple[str, int] | None = None
+    best_score = 0.0
+
+    for item in items:
+        if item.get("type") != "app":
+            continue
+        app_id = item.get("id")
+        name = (item.get("name") or "").strip()
+        if not name or not isinstance(app_id, int) or app_id <= 0:
+            continue
+        is_demo = "demo" in name.lower()
+        if wants_demo and not is_demo:
+            continue
+        if not wants_demo and is_demo:
+            continue
+
+        score = _score_name_match(term, name)
+        if score > best_score:
+            best_score = score
+            best = (name, app_id)
+
+    # Require a reasonable match so random partial queries don't grab unrelated titles.
+    if best and best_score >= 0.45:
+        return best
     return None
+
+
+_STEAM_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
 
 
 async def _search_steamcharts_search_page(term: str) -> tuple[str, int] | None:
@@ -589,6 +651,7 @@ async def _search_steamcharts_search_page(term: str) -> tuple[str, int] | None:
             resp = await client.get(
                 "https://steamcharts.com/search/",
                 params={"q": term},
+                headers=_STEAM_HTTP_HEADERS,
             )
             if resp.status_code != 200:
                 return None
@@ -596,8 +659,7 @@ async def _search_steamcharts_search_page(term: str) -> tuple[str, int] | None:
     except Exception:
         return None
 
-    # Steam Charts search results have links like <a href="/app/730">Counter-Strike 2</a>
-    # We take the first /app/XXXX that looks like a real game (not dedicated server, etc.).
+    # Steam Charts search results have links like <a href="/app/730">...</a>
     # The search is relevance ordered, so the very first app link is usually correct.
     match = re.search(r'href=["\']/app/(\d+)["\']', html)
     if not match:
@@ -605,13 +667,18 @@ async def _search_steamcharts_search_page(term: str) -> tuple[str, int] | None:
 
     app_id = int(match.group(1))
 
-    # Try to extract a nice name near the link. Look for the text content of the first link.
-    # Fallback to the original term if we can't parse a better name.
+    # Prefer the alt text on the thumbnail image (clean game name).
     name_match = re.search(
-        r'href=["\']/app/' + str(app_id) + r'["\'][^>]*>([^<]+)</a>',
+        r'href=["\']/app/' + str(app_id) + r'["\'][^>]*>\s*<img[^>]+alt="([^"]+)"',
         html,
         re.IGNORECASE,
     )
+    if not name_match:
+        name_match = re.search(
+            r'href=["\']/app/' + str(app_id) + r'["\'][^>]*>([^<]+)</a>',
+            html,
+            re.IGNORECASE,
+        )
     name = name_match.group(1).strip() if name_match else term
 
     if app_id > 0:
@@ -619,15 +686,24 @@ async def _search_steamcharts_search_page(term: str) -> tuple[str, int] | None:
     return None
 
 
-async def _validate_app_has_players(app_id: int) -> bool:
-    """Quick validation: can we get a current player count for this AppID?
-
-    Uses the official unauthenticated Steam API. For a game that is live on
-    Steam Charts (even brand new), this almost always returns a number quickly.
-    Returns True if we got a non-negative integer (including 0 for quiet games).
-    """
-    current = await _get_current_players_from_steam_api(app_id)
-    return current is not None and current >= 0
+async def _validate_steam_app_exists(app_id: int) -> bool:
+    """Confirm app_id is a real Steam application (store appdetails API)."""
+    if app_id <= 0:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(
+                "https://store.steampowered.com/api/appdetails",
+                params={"appids": app_id, "l": "english"},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                entry = data.get(str(app_id), {})
+                if entry.get("success"):
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 async def get_top_steam_games(limit: int = 10) -> list[tuple[str, int]]:
@@ -689,13 +765,13 @@ async def _resolve_steam_game(term: str) -> tuple[str, int] | None:
     """Resolve a user-provided game term to (display_name, app_id).
 
     1. Fast local path: exact match + aliases + fuzzy (difflib) against our curated + popular list.
-    2. Dynamic fallback (for new games, obscure titles, etc.):
-       - First tries Steam Store search API.
-       - Then tries Steam Charts own search page (https://steamcharts.com/search).
-       - Validates the AppID by querying Steam's public player count API.
+    2. Dynamic fallback (any Steam title by name):
+       - Steam Store search API (primary — works for virtually all published games).
+       - Steam Charts search page when store search finds nothing.
+       - Store appdetails check for charts-only hits (not player-count API, which
+         returns result=42 for many valid games without live concurrent stats).
 
-    This combination means that if a game is new and already visible on steamcharts.com,
-    we have a very high chance of finding its AppID even if it is not in our static list.
+    This resolves brand-new, obscure, or unlisted games — not only our static map.
     """
     # Local fast path (exact, contains, fuzzy via difflib)
     local = _resolve_steam_game_local(term)
@@ -705,3 +781,452 @@ async def _resolve_steam_game(term: str) -> tuple[str, int] | None:
     # Dynamic search fallback (store + steamcharts search + validation)
     dynamic = await _search_steam_for_app(term)
     return dynamic
+
+
+# =============================================================================
+# Shared game data API (RapidFuzz + cached full Steam app list)
+# Powers /steamchart, /stmchr, and /topgames.
+# =============================================================================
+
+_APP_LIST: list[dict[str, Any]] = []
+_APP_NAMES: list[str] = []
+_NAME_TO_APPID: dict[str, int] = {}
+_APPID_TO_NAME: dict[int, str] = {}
+_APP_LIST_LOADED = False
+_APP_LIST_LOCK = asyncio.Lock()
+_FETCH_SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_STEAM_FETCHES)
+
+
+def _steam_app_list_cache_path() -> Path:
+    return Path(_DATA_DIR) / STEAM_APP_LIST_FILENAME
+
+
+def _index_app_list(apps: list[dict[str, Any]]) -> None:
+    """Build in-memory indexes for fast exact + fuzzy lookups."""
+    global _APP_LIST, _APP_NAMES, _NAME_TO_APPID, _APPID_TO_NAME
+    _APP_LIST = apps
+    _APP_NAMES = []
+    _NAME_TO_APPID = {}
+    _APPID_TO_NAME = {}
+    for entry in apps:
+        appid = entry.get("appid")
+        name = (entry.get("name") or "").strip()
+        if not name or not isinstance(appid, int) or appid <= 0:
+            continue
+        _APP_NAMES.append(name)
+        _NAME_TO_APPID[name] = appid
+        _APPID_TO_NAME[appid] = name
+
+
+def _load_app_list_from_disk() -> list[dict[str, Any]] | None:
+    path = _steam_app_list_cache_path()
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        apps = payload.get("apps")
+        fetched_at = float(payload.get("fetched_at", 0))
+        if not isinstance(apps, list) or not apps:
+            return None
+        if time.time() - fetched_at > CACHE_MAX_AGE_SECONDS:
+            return None
+        return apps
+    except Exception as exc:
+        logger.debug("[Steam] Could not read app list cache: %s", exc)
+        return None
+
+
+def _save_app_list_to_disk(apps: list[dict[str, Any]]) -> None:
+    path = _steam_app_list_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"fetched_at": time.time(), "apps": apps}
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception as exc:
+        logger.warning("[Steam] Could not write app list cache: %s", exc)
+
+
+def _seed_app_list_from_curated() -> list[dict[str, Any]]:
+    """Bootstrap list from curated aliases + fixed /stmchr entries."""
+    seen: set[int] = set()
+    apps: list[dict[str, Any]] = []
+    for disp, appid in STEAM_GAMES.values():
+        if appid not in seen:
+            apps.append({"appid": appid, "name": disp})
+            seen.add(appid)
+    for disp, appid in _STMCHR_GAMES:
+        if appid not in seen:
+            apps.append({"appid": appid, "name": disp})
+            seen.add(appid)
+    return apps
+
+
+def _parse_app_list_payload(data: Any) -> list[dict[str, Any]]:
+    """Normalize several Steam app-list JSON shapes into [{appid, name}, ...]."""
+    raw_apps: list[Any] = []
+    if isinstance(data, dict):
+        raw_apps = (data.get("applist") or {}).get("apps") or data.get("apps") or []
+    elif isinstance(data, list):
+        raw_apps = data
+
+    apps: list[dict[str, Any]] = []
+    for entry in raw_apps:
+        if not isinstance(entry, dict):
+            continue
+        appid = entry.get("appid") or entry.get("id")
+        name = (entry.get("name") or "").strip()
+        if name and isinstance(appid, int) and appid > 0:
+            apps.append({"appid": appid, "name": name})
+    return apps
+
+
+async def _download_steam_app_list() -> list[dict[str, Any]]:
+    """Fetch the full Steam games list (official API first, then public mirror)."""
+    sources = [
+        ("official", "https://api.steampowered.com/ISteamApps/GetAppList/v2/"),
+        (
+            "mirror",
+            "https://raw.githubusercontent.com/jsnli/steamappidlist/master/data/games_appid.json",
+        ),
+    ]
+
+    async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
+        for label, url in sources:
+            try:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    logger.debug("[Steam] %s app list returned %s", label, resp.status_code)
+                    continue
+                apps = _parse_app_list_payload(resp.json())
+                if apps:
+                    logger.info("[Steam] Loaded %d titles from %s app list", len(apps), label)
+                    return apps
+            except Exception as exc:
+                logger.debug("[Steam] %s app list failed: %s", label, exc)
+
+    seed = _seed_app_list_from_curated()
+    if seed:
+        logger.warning("[Steam] Using curated seed app list (%d titles)", len(seed))
+    return seed
+
+
+def _remember_app_in_cache(name: str, appid: int) -> None:
+    """Append a newly resolved title to the in-memory list and persist to disk."""
+    if not name or appid <= 0:
+        return
+    if appid in _APPID_TO_NAME:
+        return
+
+    _APP_LIST.append({"appid": appid, "name": name})
+    _APP_NAMES.append(name)
+    _NAME_TO_APPID[name] = appid
+    _APPID_TO_NAME[appid] = name
+
+    path = _steam_app_list_cache_path()
+    try:
+        existing: list[dict[str, Any]] = []
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            existing = payload.get("apps") or []
+        merged = {int(a["appid"]): a for a in existing if a.get("appid")}
+        merged[appid] = {"appid": appid, "name": name}
+        _save_app_list_to_disk(list(merged.values()))
+    except Exception:
+        pass
+
+
+async def ensure_steam_app_list_loaded(*, force_refresh: bool = False) -> None:
+    """Load the cached Steam app list into memory; refresh from API when stale."""
+    global _APP_LIST_LOADED
+
+    async with _APP_LIST_LOCK:
+        if _APP_LIST_LOADED and not force_refresh:
+            return
+
+        apps: list[dict[str, Any]] | None = None
+        if not force_refresh:
+            apps = _load_app_list_from_disk()
+
+        if apps is None:
+            apps = await _download_steam_app_list()
+            if apps:
+                _save_app_list_to_disk(apps)
+            elif _steam_app_list_cache_path().exists():
+                # Stale cache is better than nothing when the API is down.
+                try:
+                    with _steam_app_list_cache_path().open("r", encoding="utf-8") as f:
+                        stale = json.load(f).get("apps") or []
+                    if stale:
+                        apps = stale
+                        logger.info("[Steam] Using stale app list cache (API refresh failed)")
+                except Exception:
+                    pass
+
+        if apps:
+            _index_app_list(apps)
+            _APP_LIST_LOADED = True
+            logger.info("[Steam] App list ready (%d titles)", len(_APP_NAMES))
+        else:
+            logger.warning("[Steam] App list unavailable — fuzzy matching will be limited")
+
+
+async def warmup_steam_app_list() -> None:
+    """Background-friendly startup hook (call from on_ready)."""
+    try:
+        await ensure_steam_app_list_loaded()
+    except Exception as exc:
+        logger.debug("[Steam] App list warmup failed (non-fatal): %s", exc)
+
+
+def _significant_tokens(term: str) -> list[str]:
+    """Distinctive tokens from a query (used to reject bogus fuzzy hits)."""
+    norm = _normalize_name(term)
+    return [t for t in norm.split() if len(t) >= 3 and t not in _MATCH_STOP_WORDS]
+
+
+def _tokens_match_candidate(tokens: list[str], candidate_name: str) -> bool:
+    """Require meaningful query tokens to appear in the candidate title."""
+    if not tokens:
+        return True
+    cand = _normalize_name(candidate_name)
+    matched = sum(1 for t in tokens if t in cand)
+    return matched >= len(tokens)
+
+
+def _fuzzy_match_from_app_list(term: str) -> tuple[str, int] | None:
+    """RapidFuzz match against the in-memory full Steam app list."""
+    if not term or not _APP_NAMES:
+        return None
+
+    norm_term = _normalize_name(term)
+    for name, appid in _NAME_TO_APPID.items():
+        if _normalize_name(name) == norm_term:
+            return (name, appid)
+
+    query_lower = term.lower()
+    wants_demo = "demo" in query_lower
+    sig_tokens = _significant_tokens(term)
+
+    candidates = process.extract(
+        term,
+        _APP_NAMES,
+        scorer=fuzz.token_set_ratio,
+        limit=15,
+        score_cutoff=FUZZY_MATCH_THRESHOLD,
+    )
+
+    best: tuple[str, int] | None = None
+    best_score = 0.0
+    for name, score, _ in candidates:
+        if not _tokens_match_candidate(sig_tokens, name):
+            continue
+        is_demo = "demo" in name.lower()
+        if wants_demo and not is_demo:
+            continue
+        if not wants_demo and is_demo:
+            continue
+        if score > best_score:
+            best_score = score
+            appid = _NAME_TO_APPID.get(name)
+            if appid:
+                best = (name, appid)
+    return best
+
+
+async def _resolve_term_to_app(
+    term: str,
+    preresolved: dict[str, int] | None,
+) -> tuple[str, int] | None:
+    """Resolve one user term to (matched_name, appid)."""
+    if preresolved and term in preresolved:
+        appid = preresolved[term]
+        matched = _APPID_TO_NAME.get(appid) or term
+        return (matched, appid)
+
+    # Curated aliases remain a fast path (cs2, poe2, bdo, etc.).
+    local = _resolve_steam_game_local(term)
+    if local:
+        return local
+
+    # Store search before fuzzy: authoritative for natural-language titles and demos.
+    store_hit = await _search_store_api(term)
+    if store_hit:
+        matched_name, appid = store_hit
+        _remember_app_in_cache(matched_name, appid)
+        _cache_resolution(_normalize_name(term), store_hit)
+        return store_hit
+
+    fuzzy = _fuzzy_match_from_app_list(term)
+    if fuzzy:
+        return fuzzy
+
+    # Last resort: charts search + store validation.
+    charts_hit = await _search_steam_for_app(term)
+    if charts_hit:
+        matched_name, appid = charts_hit
+        _remember_app_in_cache(matched_name, appid)
+    return charts_hit
+
+
+async def _fetch_player_count_for_app(appid: int) -> int | None:
+    """Current concurrent players via the official Steam API."""
+    async with _FETCH_SEMAPHORE:
+        return await _get_current_players_from_steam_api(appid)
+
+
+async def _fetch_image_from_appdetails(appid: int) -> str | None:
+    """Header or capsule image from the Steam store appdetails API."""
+    async with _FETCH_SEMAPHORE:
+        try:
+            async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+                resp = await client.get(
+                    "https://store.steampowered.com/api/appdetails",
+                    params={"appids": appid, "l": "english"},
+                )
+                if resp.status_code != 200:
+                    return None
+                data = resp.json()
+        except Exception:
+            return None
+
+        entry = data.get(str(appid), {})
+        if not entry.get("success"):
+            return None
+        app_data = entry.get("data") or {}
+        for key in ("header_image", "capsule_image", "capsule_imagev5"):
+            url = app_data.get(key)
+            if isinstance(url, str) and url.startswith("http"):
+                return url
+        return None
+
+
+async def _find_demo_with_player_stats(game_name: str, game_appid: int) -> tuple[int, str] | None:
+    """If the main app has no live stats, try its Steam Demo (where CCU is often tracked).
+
+    SteamDB shows concurrent players for demos/playtests via the same official API
+    (GetNumberOfCurrentPlayers) — the full release may return result=42 until launch.
+    """
+    if "demo" in game_name.lower():
+        return None
+
+    demo_hit = await _search_store_api(f"{game_name} Demo")
+    if not demo_hit:
+        return None
+
+    demo_name, demo_appid = demo_hit
+    if demo_appid == game_appid:
+        return None
+
+    demo_count = await _fetch_player_count_for_app(demo_appid)
+    if demo_count is None:
+        return None
+    return (demo_count, demo_name)
+
+
+async def _enrich_game_entry(
+    original_name: str,
+    matched_name: str,
+    appid: int,
+) -> dict[str, Any]:
+    """Fetch player count + image for a resolved app."""
+    player_task = asyncio.create_task(_fetch_player_count_for_app(appid))
+    image_task = asyncio.create_task(_fetch_image_from_appdetails(appid))
+    player_count, image_url = await asyncio.gather(player_task, image_task)
+
+    player_count_source = "app"
+    if player_count is None:
+        demo_stats = await _find_demo_with_player_stats(matched_name, appid)
+        if demo_stats:
+            player_count, _demo_label = demo_stats
+            player_count_source = "demo"
+
+    if not image_url:
+        image_url = await _resolve_steam_thumb(appid)
+    if not image_url:
+        image_url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"
+
+    return {
+        "original_name": original_name,
+        "matched_name": matched_name,
+        "appid": appid,
+        "player_count": player_count,
+        "player_count_source": player_count_source,
+        "image_url": image_url,
+    }
+
+
+async def get_steam_game_data(
+    game_names: str,
+    *,
+    preresolved: dict[str, int] | None = None,
+    max_games: int = 8,
+) -> list[dict[str, Any]]:
+    """Resolve comma-separated game names and return player counts + store images.
+
+    Each result dict contains:
+      - original_name: user-provided term
+      - matched_name: canonical Steam title
+      - appid: Steam application ID
+      - player_count: current concurrent players (int or None if unavailable)
+      - image_url: header/capsule image URL
+
+    Results are sorted by player_count descending (unknown counts last).
+    """
+    await ensure_steam_app_list_loaded()
+
+    if not game_names or not game_names.strip():
+        return []
+
+    terms: list[str] = []
+    seen_terms: set[str] = set()
+    for raw in game_names.split(","):
+        term = raw.strip()
+        if not term:
+            continue
+        key = term.lower()
+        if key in seen_terms:
+            continue
+        seen_terms.add(key)
+        terms.append(term)
+        if len(terms) >= max_games:
+            break
+
+    resolved: list[tuple[str, str, int]] = []
+    for term in terms:
+        match = await _resolve_term_to_app(term, preresolved)
+        if match:
+            matched_name, appid = match
+            resolved.append((term, matched_name, appid))
+
+    if not resolved:
+        return []
+
+    enrich_tasks = [
+        _enrich_game_entry(original, matched, appid)
+        for original, matched, appid in resolved
+    ]
+    results = await asyncio.gather(*enrich_tasks, return_exceptions=True)
+
+    games: list[dict[str, Any]] = []
+    for item in results:
+        if isinstance(item, dict):
+            games.append(item)
+
+    games.sort(
+        key=lambda g: (g.get("player_count") is not None, g.get("player_count") or 0),
+        reverse=True,
+    )
+    return games
+
+
+def stmchr_game_names_csv() -> str:
+    """Comma-separated display names for the fixed /stmchr list."""
+    return ", ".join(name for name, _ in _STMCHR_GAMES)
+
+
+def stmchr_preresolved_map() -> dict[str, int]:
+    """Map display name -> appid for the fixed /stmchr list."""
+    return {name: appid for name, appid in _STMCHR_GAMES}
