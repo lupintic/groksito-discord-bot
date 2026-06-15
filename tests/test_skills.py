@@ -153,7 +153,7 @@ def test_registry_list_approved_filters_correctly(temp_registry):
 async def test_decision_direct_for_timeless_query():
     dec = await make_decision(
         user_message="qué es la fotosíntesis",
-        is_mentioned=True,
+        is_mentioned=False,
         context_need="normal",
     )
     assert dec.action == DecisionAction.DIRECT
@@ -167,8 +167,9 @@ async def test_decision_search_for_fresh_data():
         is_mentioned=True,
         context_need="normal",
     )
-    # Heuristic should lean toward search for live signals
-    assert dec.needs_search in ("web", "both")
+    # Post #48: search routing lives in Grok's native tool calling, not heuristics.
+    assert dec.needs_search == "none"
+    assert dec.needs_recent_context is True
 
 
 @pytest.mark.asyncio
@@ -179,9 +180,9 @@ async def test_decision_use_skill_when_approved_provided():
         approved_skill_names=["steam-player-counts"],
         context_need="normal",
     )
-    # When approved skill matches and signals are present, should offer use_skill path
-    # (the full native tool calling happens later; here we just check the Decision)
-    assert dec.use_skill == "steam-player-counts" or dec.action == DecisionAction.USE_SKILL
+    # Skill selection is model-driven via use_skill tool; heuristic only signals addressed turns.
+    assert dec.needs_recent_context is True
+    assert dec.needs_search == "none"
 
 
 # =============================================================================

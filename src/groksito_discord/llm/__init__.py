@@ -7,4 +7,11 @@ from .client import (
     call_grok_for_groksito,
     call_grok_with_tools,
 )
+from .prompt_builder import SUMMARIZATION_PROMPT, SYSTEM_PROMPT
 
+__all__ = [
+    "call_grok_for_groksito",
+    "call_grok_with_tools",
+    "SYSTEM_PROMPT",
+    "SUMMARIZATION_PROMPT",
+]

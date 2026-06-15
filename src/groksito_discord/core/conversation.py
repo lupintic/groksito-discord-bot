@@ -39,6 +39,7 @@ from .intent import (
     GENERAL_REPLY_INQUIRY_KEYWORDS,
     _has_strong_directed_reply_intent,
     _has_recent_referent_intent,
+    referenced_has_media_attachments,
 )
 
 logger = logging.getLogger("groksito.conversation")
@@ -69,16 +70,14 @@ async def _resolve_referenced_and_activation(
     Determines activation intent and fetches the referenced message if present.
     Returns: (referenced_message, is_reply_to_bot, explicit_visual_reply_intent, is_reply_continuation, has_x_link_intent, has_image_creation_intent)
 
-    ACTIVATION POLICY (strict, post-bugfix):
-    - Direct @mention ΓåÆ activate
-    - Reply to one of *our* messages ΓåÆ activate
-    - Reply to *another user* ΓåÆ only activate on strong directed signals
-      (explicit visual follow-up keywords or the STRONG_DIRECTED_KEYWORDS list
-       which includes targeted questions about the referenced item + bot name mentions).
+    ACTIVATION POLICY (strict):
+    - Direct @mention → activate
+    - Reply to one of *our* messages → activate
+    - Reply to *another user* without @mention → never activate (even with images,
+      videos, or "groksito" in text). User-to-user threads must stay silent.
 
-    The broad GENERAL_REPLY_INQUIRY_KEYWORDS only affect *context quality* for
-    already-activated turns. They must never cause the bot to wake up on ordinary
-    user-to-user replies.
+    GENERAL_REPLY_INQUIRY_KEYWORDS and media referents only enrich context on
+    already-activated turns (@mention or reply-to-bot).
 
     has_x_link_intent (broadened) is still passed downstream so the LLM and vision
     harvester can provide rich referenced context + chain traversal when appropriate.
@@ -145,37 +144,10 @@ async def _resolve_referenced_and_activation(
         # even for broader inquiries. The broadening no longer affects wake-up decisions.
         has_x_link_intent = has_specific_x or has_general_reply_inquiry
 
-        explicit_image_reply_keywords = [
-            # Edit/transform style operations on a specific image
-            "edita esta", "edita la", "edit├í esta", "edit├í la",
-            "transforma esta", "transforma la", "convierte esta", "convierte la",
-            "pasa esta a", "pasa la a", "cambia esta a", "cambia la a",
-            "redibuja esta", "redibuja la",
-            "meme con esta", "meme con la", "haz un meme con esta",
-            "genera un estilo con esta", "haz un estilo con esta",
-            # Analysis / describe the referenced image (broadened for reliability)
-            "qu├⌐ ves en esta", "qu├⌐ ves en la", "analiza esta", "analiza la",
-            "describe", "qu├⌐ ves", "cu├⌐ntame de esta", "qu├⌐ hay en esta",
-            "qu├⌐ ves aqu├¡", "qu├⌐ ves en la foto", "qu├⌐ ves en la imagen",
-            "explica esta", "explica la", "explica esto", "describe esta", "describe la",
-            # Common casual references to the image being replied to
-            "qu├⌐ es esto", "esto qu├⌐ es", "qu├⌐ es esta", "mira esta", "mira la", "mira esto",
-            "opina de esta", "qu├⌐ opinas de esta", "qu├⌐ piensas de esta", "esta imagen", "esta foto",
-            # Reference to previous / bot-generated image (critical for text-URL case)
-            "esa imagen", "esas im├ígenes", "la imagen", "esa foto", "la foto",
-            "la que generaste", "la que mandaste", "la anterior", "la de antes",
-            "la foto anterior", "el video anterior", "la generada", "la del bot",
-            "basado en esta", "usando esta", "con esta imagen", "con esta foto",
-            "la que respond├¡", "la url de la", "esa url",
-            # Video / animation from image
-            "video de esta", "video de la", "haz un video de esta", "haz un video de la",
-            "genera un video de esta", "genera un video de la", "crea un video de esta",
-            "anima esta", "anima la", "convierte esta en video", "convierte la en video",
-            "video con esta foto", "haz video de la que respond├¡",
-        ]
-        if any(kw in text_lower for kw in explicit_image_reply_keywords):
+        # Media referent enriches vision/tools only on addressed turns — never wakes alone.
+        if referenced_has_media_attachments(referenced) and (is_mentioned_now or is_reply_to_bot):
             explicit_visual_reply_intent = True
-            logger.info(f"{cid_p}[Reply] Visual follow-up intent detected in reply")
+            logger.info(f"{cid_p}[Reply] Media referent on addressed turn (image/video attachment)")
 
         if has_x_link_intent:
             logger.info(f"{cid_p}[Reply] Reply inquiry intent detected (user appears to be asking about the referenced message content)")
@@ -188,37 +160,21 @@ async def _resolve_referenced_and_activation(
         if not (message.reference and message.reference.message_id):
             logger.info(f"{cid_p}[Mention] Recent referent / inquiry language on direct mention (ensuring recent context + possible vision for referent)")
 
-    # === STRICT REPLY ACTIVATION LOGIC (bugfix for user-to-user reply spam) ===
-    # Design principle (conservative):
-    # - Mention in current message ΓåÆ always wake
-    # - Reply directly to one of *our* previous messages ΓåÆ always wake
-    # - Reply to *someone else* ΓåÆ only wake on *very strong* directed signals:
-    #     * explicit visual intent (the long "edita esta / video de esta / la que generaste" list)
-    #     * strong targeted inquiry phrases (the STRONG_DIRECTED_KEYWORDS)
-    #     * explicit bot name mention in the reply text
-    #
-    # The broad GENERAL_REPLY_INQUIRY_KEYWORDS ("esto", "el anterior", "qu├⌐ opinas", etc.)
-    # are deliberately *excluded* from activation. They only influence context richness
-    # after we have already decided to respond.
+    # Activation: @mention or reply-to-bot only. No wake on user-to-user replies.
     if is_mentioned_now:
         should_activate = True
         logger.info(f"{cid_p}[Activation] Direct @mention in message from {author_display}")
-    elif is_reply_continuation:
-        if is_reply_to_bot:
-            should_activate = True
-            logger.info(f"{cid_p}[Activation] Direct reply to bot's own previous message from {author_display}")
-        elif explicit_visual_reply_intent:
-            should_activate = True
-            logger.info(f"{cid_p}[Activation] Reply to other + explicit visual intent (image/video follow-up) from {author_display}")
-        elif _has_strong_directed_reply_intent(message.content or ""):
-            should_activate = True
-            logger.info(f"{cid_p}[Activation] Reply to other + strong directed inquiry / bot name from {author_display}")
-        else:
-            should_activate = False
-            logger.info(f"{cid_p}[Groksito] Ignoring reply from {author_display} to another user (plain user-to-user reply, no mention, not to bot, no strong directed signal)")
+    elif is_reply_continuation and is_reply_to_bot:
+        should_activate = True
+        logger.info(f"{cid_p}[Activation] Direct reply to bot's own previous message from {author_display}")
     else:
         should_activate = False
-        if not is_mentioned_now:
+        if is_reply_continuation:
+            logger.info(
+                f"{cid_p}[Groksito] Ignoring reply from {author_display} to another user "
+                f"(no @mention, not a reply to bot)"
+            )
+        elif not is_mentioned_now:
             logger.info(f"{cid_p}[Groksito] Ignoring non-reply message from {author_display} (no mention)")
 
     # Compute STRICT image creation/edit intent from CURRENT message text.

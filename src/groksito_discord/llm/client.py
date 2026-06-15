@@ -340,29 +340,13 @@ async def call_grok_for_groksito(
             # still get native search schemas so Grok + respond_directly can decide; keeps classify for extremes.
             native_search_tools = []
         else:
-            # Decision layer can now veto search schemas for clear "direct" cases.
-            # This is a major token win: we avoid shipping the full web_search + x_search
-            # descriptions (~200+ tokens) when the smarter decision (LLM or improved heuristic)
-            # says we can answer from knowledge.
-            suppress_search = False
-            if decision:
-                act = getattr(decision, "action", None)
-                act_val = getattr(act, "value", act) if act else None
-                ns = str(getattr(decision, "needs_search", "none") or "none").lower()
-                if act_val == "direct" or ns in ("none", ""):
-                    suppress_search = True
-
-            if suppress_search:
-                native_search_tools = []
-                logger.debug(f"{cid_p}[DECISION] Suppressed native web_search/x_search schemas (decision=direct or needs_search=none)")
-            else:
-                # Normal path (still lets _build_native_search_tools do its refined web-vs-x logic)
-                native_search_tools = _build_native_search_tools(
-                    query_text=user_message_text,
-                    context_need=need,
-                    has_visual_intent=vision_or_visual_query,
-                    has_attached_images=bool(image_urls),
-                )
+            # Prompt-driven (#48): offer native search on normal/rich turns; Grok decides usage.
+            native_search_tools = _build_native_search_tools(
+                query_text=user_message_text,
+                context_need=need,
+                has_visual_intent=vision_or_visual_query,
+                has_attached_images=bool(image_urls),
+            )
 
         # === Apply skill restrictions to tool offering (if a skill is active) ===
         try:

@@ -37,7 +37,7 @@ import httpx
 
 from ..utils.correlation import cid_prefix
 from ..config import settings
-from .delivery import consume_image_request, register_image_request
+from .delivery import build_video_caption, deliver_from_request, register_image_request
 
 # Bearer (OAuth preferred)
 try:
@@ -395,45 +395,22 @@ async def _tool_generate_video(
                 pass
             return "The video was generated but no downloadable URL was obtained. Try again later."
 
-        # === SUCCESS PATH (modern natural delivery) ===
-        mode_label = "a partir de la imagen de referencia" if is_from_image else "generado"
-        delivery_text = (
-            f"Acá tenés el video {mode_label}. (480p, {enforced_duration}s)\n"
-            f"{video_url}\n\n"
-            f"Video {daily_used}/5 del día — te quedan {daily_remaining}."
+        caption = build_video_caption(
+            from_image=is_from_image,
+            duration=enforced_duration,
+            daily_used=daily_used,
+            daily_remaining=daily_remaining,
         )
 
-        delivered = False
-        if request_id:
-            info = await consume_image_request(request_id)
-            if info:
-                orig_msg = info.get("original_message")
-                if orig_msg:
-                    try:
-                        await orig_msg.reply(delivery_text, mention_author=False)
-                        try:
-                            ch = getattr(orig_msg, "channel", None)
-                            ch_id = getattr(ch, "id", None) if ch else None
-                            if ch_id:
-                                from .. import context as ctx
-                                ctx.update_from_message(
-                                    channel_id=ch_id,
-                                    user_id=0,
-                                    author_name="Groksito",
-                                    content=delivery_text or "",
-                                    is_bot=True,
-                                )
-                        except Exception:
-                            pass
-                        logger.info(f"{cid_prefix()}[ImageDelivery] Directly delivered video result for request {request_id} (xAI id: {xai_video_id})")
-                        delivered = True
-                    except Exception as send_err:
-                        logger.warning(f"{cid_prefix()}[ImageDelivery] Failed to direct-reply video for {request_id}: {send_err}")
-
-        if delivered:
+        if request_id and await deliver_from_request(
+            request_id, caption=caption, urls=[video_url], kind="video"
+        ):
+            logger.info(
+                f"{cid_prefix()}[MediaDelivery] Video delivered as attachment for request {request_id} "
+                f"(xAI id: {xai_video_id})"
+            )
             return "SUCCESS: Video successfully generated and delivered directly to the user."
 
-        # Fallback
         return f"Video generated successfully:\n{video_url}"
 
     except Exception as e:
@@ -455,16 +432,6 @@ async def _handle_generate_video(args: dict, original_message: Any, image_urls: 
     - Calls the modern _tool_generate_video (with prompt enhancement).
     """
     prompt = args.get("prompt", "")
-
-    # Lazy import to avoid any potential circularity (has_explicit_video_intent lives in media_tools)
-    from ..media_tools import has_explicit_video_intent
-    if not has_explicit_video_intent(user_text := (getattr(original_message, "content", "") or "")) \
-       and not has_explicit_video_intent(prompt or ""):
-        return (
-            "No clear explicit request to generate a video was detected. "
-            "Use phrases like 'haz un video de esta imagen', 'anima esta foto' "
-            "or 'genera un video de esta' to activate this tool."
-        )
 
     duration = int(args.get("duration", 5))
     aspect_ratio = args.get("aspect_ratio") or args.get("aspect") or None

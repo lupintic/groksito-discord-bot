@@ -18,8 +18,7 @@ Important invariants (do not break):
 - Guild whitelist checked in both on_message and every slash command.
 - Rate limit check happens *before* invoking the LLM path.
 - Context (short-term channel history) is always updated for *every* message.
-- Strict activation policy in conversation.py prevents replying to random
-  user-to-user conversations (only mentions, direct bot replies, or strong signals).
+- Strict activation policy: only @mentions or direct replies to Groksito messages.
 - Direct media delivery uses the DIRECT_DELIVERY_PERFORMED sentinel
   (cooperates with image_delivery.py + llm.py to guarantee exactly one reply).
 - Background heartbeat task keeps the web UI informed of connection status.
@@ -656,7 +655,6 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
         _build_referenced_context,
         _harvest_vision_images,
         _invoke_groksito,
-        _has_strong_directed_reply_intent,
     )
 
     # on_ready
@@ -847,23 +845,10 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
 
             is_mentioned = _discord_client.user in getattr(message, "mentions", [])
 
-            # === STRICT ACTIVATION GUARD (prevents replying to random user-to-user replies) ===
-            # We deliberately do NOT use the broad `has_x_link_intent` here for wake-up.
-            # The resolve function already applied the conservative rules and logged the reason.
-            if is_mentioned:
-                # Direct mention always wins (resolve also logged it)
-                pass
-            elif is_reply_to_bot:
-                pass
-            elif is_reply_cont:
-                # For replies to *other humans*, only very strong signals should wake us.
-                # We re-check with the exported helper for defense-in-depth.
-                strong_signal = explicit_visual or _has_strong_directed_reply_intent(message.content or "")
-                if not strong_signal:
-                    # The detailed "Ignoring reply to another user" log was already emitted by resolve.
-                    return
-            else:
-                # Plain message with no mention ΓåÆ ignore (no reply reference)
+            # === STRICT ACTIVATION GUARD ===
+            # Only @mention or direct reply to a Groksito message. User-to-user replies
+            # (even with images, videos, or "groksito" in text) must never wake the bot.
+            if not is_mentioned and not is_reply_to_bot:
                 return
 
             # Rate limit

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from ..core.intent import is_conversation_meta_question
 from ..utils.correlation import cid_prefix
 
 logger = logging.getLogger("groksito.skills.decision")
@@ -131,88 +132,6 @@ async def make_decision(
     signals_text = json.dumps(signals, ensure_ascii=False)
     prompt = DECISION_PROMPT.replace("{ signals }", signals_text)
 
-    # ------------------------------------------------------------------
-    # Efficiency win: fast local pre-filter for obvious direct cases.
-    # If this triggers we completely avoid the extra tiny decision LLM call.
-    # This is safe because the improved heuristic below is now quite accurate.
-    # ------------------------------------------------------------------
-    tlow = (user_message or "").lower()
-    has_strong_timeless = any(
-        k in tlow
-        for k in (
-            "qué es",
-            "que es",
-            "quién es",
-            "quien es",
-            "qué significa",
-            "como se define",
-            "capital de",
-            "fórmula",
-            "matemática",
-            "explica el concepto",
-            "definición de",
-            "cómo funciona un",
-            "por qué existe",
-        )
-    )
-    has_strong_fresh = any(
-        k in tlow
-        for k in (
-            "hoy",
-            "ahora",
-            "actual",
-            "en este momento",
-            "en vivo",
-            "live",
-            "breaking",
-            "última hora",
-            "dólar blue",
-            "precio hoy",
-            "cotización",
-            "clima hoy",
-            "steam chart",
-            "steam charts",
-            "player count",
-            "player counts",
-            "concurrent player",
-            "jugadores steam",
-            "pico de jugadores",
-            "cuántos jugadores",
-            "cuantos jugadores",
-            "steam player",
-            "charts player",
-            "latest",
-            "reciente",
-            "controvers",
-            "polémica",
-            "problemas",
-            "issues",
-            "drama",
-            "scandal",
-            "qué pasó",
-            "what happened",
-            "recent",
-        )
-    )
-    has_x_signal = any(k in tlow for k in ("x.com", "tweet", "en tendencia", "twitter"))
-
-    if (
-        has_strong_timeless
-        and not has_strong_fresh
-        and not has_x_signal
-        and not (is_mentioned or is_reply_to_bot)
-        and context_need not in ("rich",)
-        and not (approved_skill_names or [])
-    ):
-        # Very confident direct + no need for model nuance -> skip LLM decision call
-        return _heuristic_decision(
-            user_message=user_message,
-            is_mentioned=is_mentioned,
-            is_reply_to_bot=is_reply_to_bot,
-            recent_signals=recent_signals,
-            context_need=context_need,
-        )
-
     # NOTE (evolution to native tool calling):
     # The primary decision-making for context, skill use/creation, and direct vs tool actions
     # has moved to the model's native tool calling (get_recent_context, use_skill, create_skill,
@@ -290,130 +209,21 @@ def _heuristic_decision(
     context_need: str = "normal",
 ) -> Decision:
     """
-    Improved local heuristic (used both for fast-path skips and as fallback).
+    Lightweight fallback — no keyword-based search routing (#48).
 
-    Tries hard to match the refined prompt:
-    - Strong bias toward "direct" for definitional/timeless questions.
-    - Only triggers search on clear time-sensitive + recency signals.
-    - Good recent_context detection on addressed turns.
-    - Respects context_need (lean direct on casual/minimal).
+    Search and intent decisions live in Grok's tool-calling flow. This helper only
+    signals whether recent context may be useful on addressed turns.
     """
-    t = (user_message or "").lower()
-
-    if context_need in ("casual", "minimal", "image_gen"):
-        # Ultra-light turns should almost never search or need heavy context
-        return Decision(
-            action=DecisionAction.DIRECT,
-            needs_recent_context=is_mentioned or is_reply_to_bot,
-            needs_search="none",
-            rationale="heuristic-casual",
-        )
-
-    # --- Recent / address signals (very important for coherence) ---
-    recent_kw = (
-        "antes",
-        "dijimos",
-        "hablábamos",
-        "qué pasó",
-        "continúa",
-        "de qué",
-        "resumen de la",
-        "la charla",
-        "tema anterior",
-    )
     is_addressed = is_mentioned or is_reply_to_bot
-    needs_recent = is_addressed or any(k in t for k in recent_kw)
+    needs_recent = is_addressed or is_conversation_meta_question(user_message)
 
-    # --- Timeless / definitional patterns (force direct) ---
-    timeless_starters = (
-        "qué es",
-        "que es",
-        "quién es",
-        "quien es",
-        "qué significa",
-        "como se define",
-        "capital de",
-        "fórmula de",
-        "explica qué es",
-        "definición",
-        "cómo funciona un",
-        "por qué existe",
-        "qué es la",
-        "concepto de",
-    )
-    has_timeless = any(k in t for k in timeless_starters)
-
-    # --- Strong fresh / live / current-value signals (the only things that justify search) ---
-    # Post-cleanup: trimmed terms; sufficient for fast-path efficiency; model + native tools handle nuance.
-    strong_fresh = (
-        "hoy",
-        "ahora",
-        "actual",
-        "en vivo",
-        "live",
-        "breaking",
-        "última hora",
-        "dólar blue",
-        "cotización",
-        "clima hoy",
-        "pico jugadores",
-        "steam chart",
-        "steam charts",
-        "player count",
-        "jugadores steam",
-        "pico de jugadores",
-        "cuántos jugadores",
-        "latest",
-        "reciente",
-        "controvers",
-        "polémica",
-        "problemas",
-        "qué pasó",
-        "what happened",
-        "recent",
-    )
-    has_strong_fresh = any(k in t for k in strong_fresh)
-
-    # Weaker time words that are often not enough by themselves
-    weak_time = (
-        "precio",
-        "dólar",
-        "partido",
-        "noticia",
-        "resultados",
-        "clima",
-        "issues",
-        "problemas",
-        "controvers",
-        "drama",
-        "scandal",
-    )
-    has_weak_time = any(k in t for k in weak_time)
-
-    needs_search = "none"
-    if has_strong_fresh or (has_weak_time and not has_timeless):
-        needs_search = "web"
-
-    # X / Twitter specific
-    if any(k in t for k in ("x.com", "twitter", "tweet", "en tendencia", "post en x")):
-        needs_search = "x" if needs_search == "none" else "both"
-
-    # Decide primary action
-    action = DecisionAction.DIRECT
-    if needs_search != "none":
-        action = DecisionAction.SEARCH
-    if needs_recent and action == DecisionAction.DIRECT:
-        action = DecisionAction.RECENT_CONTEXT
-
-    # If strongly addressed + meta, we may want recent_context even if there is some fresh data
-    if needs_recent and is_addressed and not has_strong_fresh:
-        action = DecisionAction.RECENT_CONTEXT
+    action = DecisionAction.RECENT_CONTEXT if needs_recent and is_addressed else DecisionAction.DIRECT
 
     return Decision(
         action=action,
-        needs_recent_context=needs_recent or is_addressed,
-        needs_search=needs_search,
+        needs_recent_context=needs_recent,
+        needs_search="none",
         use_skill=None,
         propose_skill=None,
-        rationale="heuristic-improved",
+        rationale="heuristic-prompt-driven",
     )

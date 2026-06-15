@@ -218,6 +218,33 @@ GENERAL_REPLY_INQUIRY_KEYWORDS = [
     "lo anterior",
 ]
 
+# Discord attachment signals for reply-to-media activation (PR #49 review).
+# content_type is primary; filename extension is a fallback when Discord reports
+# video as application/octet-stream.
+_MEDIA_CONTENT_TYPE_PREFIXES = ("image/", "video/")
+_MEDIA_FILENAME_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv", ".m4v")
+
+
+def referenced_has_media_attachments(message: Any | None) -> bool:
+    """
+    True when a Discord message has image or video file attachments.
+
+    Used for visual follow-up intent on *addressed* turns (@mention or reply-to-bot)
+    when the referenced message has image/video attachments.
+    """
+    if not message:
+        return False
+    for att in getattr(message, "attachments", []) or []:
+        content_type = (getattr(att, "content_type", "") or "").lower()
+        if any(content_type.startswith(prefix) for prefix in _MEDIA_CONTENT_TYPE_PREFIXES):
+            return True
+        # Fallback: some video uploads lack a video/* MIME type.
+        filename = (getattr(att, "filename", "") or "").lower()
+        if any(filename.endswith(ext) for ext in _MEDIA_FILENAME_EXTENSIONS):
+            return True
+    return False
+
+
 def _has_strong_directed_reply_intent(text: str | None) -> bool:
     """Conservative: only strong targeted signals + bot name wake on replies to others."""
     if not text:

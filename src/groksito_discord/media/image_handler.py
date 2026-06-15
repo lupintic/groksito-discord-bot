@@ -29,7 +29,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
 import re
 import unicodedata
 from typing import Any, Optional
@@ -38,7 +37,13 @@ import httpx
 
 from ..utils.correlation import cid_prefix
 from ..config import settings
-from .delivery import consume_image_request, register_image_request
+from .delivery import (
+    build_edit_caption,
+    build_image_caption,
+    consume_image_request,
+    deliver_from_request,
+    register_image_request,
+)
 
 # Bearer resolution (OAuth preferred with refresh, fallback to key)
 try:
@@ -390,26 +395,7 @@ def soften_image_prompt(original_prompt: str) -> str:
     return _soften_prompt_for_artistic(original_prompt)
 
 
-def _build_generate_delivery_text(prompt: str, urls_block: str) -> str:
-    """Natural, minimal Grok-like delivery text (unchanged behavior)."""
-    short_desc = prompt.strip()
-    for prefix in ("un ", "una ", "el ", "la ", "los ", "las "):
-        if short_desc.lower().startswith(prefix):
-            short_desc = short_desc[len(prefix):].strip()
-            break
-    if len(short_desc) > 70:
-        short_desc = short_desc[:67].rstrip() + "…"
 
-    options = [
-        f"Acá tenés {short_desc}.",
-        "Ahí va.",
-        f"Generé {short_desc}.",
-        "Listo.",
-        f"Acá tenés la imagen que pediste.",
-        f"{short_desc}.",
-    ]
-    text = random.choice(options)
-    return f"{text}\n\n{urls_block}"
 
 
 # =============================================================================
@@ -565,29 +551,14 @@ async def _tool_generate_image(
                 urls_block = "\n".join(urls)
                 logger.info(f"{cid_prefix()}[Image] generate success: request_id={request_id}, count={len(urls)}")
 
-                display_prompt = requested_prompt  # always original for UX
-                delivery_text = _build_generate_delivery_text(display_prompt, urls_block)
+                caption = build_image_caption(requested_prompt)
 
-                if request_id:
-                    info = await consume_image_request(request_id)
-                    if info and (orig_msg := info.get("original_message")):
-                        try:
-                            await orig_msg.reply(delivery_text, mention_author=False)
-                            try:
-                                ch = getattr(orig_msg, "channel", None)
-                                if ch and (ch_id := getattr(ch, "id", None)):
-                                    from .. import context as ctx
-                                    ctx.update_from_message(channel_id=ch_id, user_id=0, author_name="Groksito",
-                                                            content=delivery_text, is_bot=True)
-                            except Exception:
-                                pass
-                            logger.info(f"{cid_prefix()}[ImageDelivery] Direct delivery success for generate {request_id}")
-                            return "SUCCESS: Image(s) generated and delivered directly to the user."
-                        except Exception as send_err:
-                            logger.error(f"{cid_prefix()}[ImageDelivery] Direct reply failed for generate: {send_err}")
-                            return f"Image URLs ready:\n{urls_block}"
+                if request_id and await deliver_from_request(
+                    request_id, caption=caption, urls=urls, kind="image"
+                ):
+                    return "SUCCESS: Image(s) generated and delivered directly to the user."
 
-                return delivery_text
+                return f"Image URLs ready:\n{urls_block}"
 
     except Exception as e:
         logger.exception(f"{cid_prefix()}[Image] Unexpected error in generate")
@@ -649,25 +620,9 @@ def _extract_edit_urls(data: dict) -> list[str]:
 async def _try_direct_edit_delivery(request_id: str, urls: list[str]) -> bool:
     if not request_id:
         return False
-    info = await consume_image_request(request_id)
-    if not info or not (orig_msg := info.get("original_message")):
-        return False
-    try:
-        delivery_text = "Acá tenés la versión editada.\n\n" + "\n".join(urls)
-        await orig_msg.reply(delivery_text, mention_author=False)
-        try:
-            ch = getattr(orig_msg, "channel", None)
-            if ch and (ch_id := getattr(ch, "id", None)):
-                from .. import context as ctx
-                ctx.update_from_message(channel_id=ch_id, user_id=0, author_name="Groksito",
-                                        content=delivery_text, is_bot=True)
-        except Exception:
-            pass
-        logger.info(f"{cid_prefix()}[ImageDelivery] Direct edit delivery for {request_id}")
-        return True
-    except Exception as send_err:
-        logger.warning(f"{cid_prefix()}[ImageDelivery] Direct edit delivery failed for {request_id}: {send_err}")
-        return False
+    return await deliver_from_request(
+        request_id, caption=build_edit_caption(), urls=urls, kind="image"
+    )
 
 
 async def _tool_edit_image(
