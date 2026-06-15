@@ -693,56 +693,46 @@ async def _handle_generate_audio(args: dict, original_message: Any) -> str:
 
 XAI_TTS_DOCS_URL = "https://docs.x.ai/developers/model-capabilities/audio/text-to-speech"
 
+# xAI wrapping speech tags exposed as the optional /audio `estilo` slash parameter.
+AUDIO_WRAPPING_TAGS: tuple[tuple[str, str], ...] = (
+    ("Susurro (whisper)", "whisper"),
+    ("Suave (soft)", "soft"),
+    ("Alto (loud)", "loud"),
+    ("Más intensidad", "build-intensity"),
+    ("Menos intensidad", "decrease-intensity"),
+    ("Tono alto", "higher-pitch"),
+    ("Tono bajo", "lower-pitch"),
+    ("Lento (slow)", "slow"),
+    ("Rápido (fast)", "fast"),
+    ("Cantar (singing)", "singing"),
+    ("Entonado (sing-song)", "sing-song"),
+    ("Risa al hablar", "laugh-speak"),
+    ("Énfasis", "emphasis"),
+)
+
+
+def apply_wrapping_speech_tag(text: str, tag: str | None) -> str:
+    """Wrap prepared text with an xAI wrapping speech tag when `estilo` is selected."""
+    if not tag or not text.strip():
+        return text
+    clean_tag = tag.strip().strip("<>/")
+    if not clean_tag:
+        return text
+    return f"<{clean_tag}>{text}</{clean_tag}>"
+
 
 def build_audio_speech_tags_embed() -> discord.Embed:
-    """Build a help embed explaining xAI Speech Tags for the /audio slash command."""
+    """Brief /audio usage help when invoked without text or a replied message."""
     embed = discord.Embed(
-        title="🔊 /audio — Text-to-Speech con Speech Tags",
+        title="🔊 /audio — Text-to-Speech",
         url=XAI_TTS_DOCS_URL,
         description=(
-            "Convierte texto en audio con voces de Grok (eve, ara, rex, sal, leo). "
-            "Puedes **responder a un mensaje** para leerlo, o escribir el texto directamente.\n\n"
-            "Las **Speech Tags** de xAI controlan pausas, risas, volumen, tono y más. "
-            "Inclúyelas en el campo `texto` del comando."
+            "Escribe el **texto** a leer o **responde a un mensaje** y ejecuta `/audio`.\n\n"
+            "• **Inline tags** van dentro del texto (ver descripción del parámetro `texto`).\n"
+            "• **Estilo envolvente** se elige en el parámetro `estilo` (whisper, soft, slow, etc.).\n"
+            "• **Voz** opcional: eve, ara, rex, sal, leo."
         ),
         color=0x5865F2,
-    )
-    embed.add_field(
-        name="Etiquetas inline `[tag]`",
-        value=(
-            "Pausas: `[pause]`, `[long-pause]`, `[hum-tune]`\n"
-            "Risa/llanto: `[laugh]`, `[chuckle]`, `[giggle]`, `[cry]`\n"
-            "Boca: `[tsk]`, `[tongue-click]`, `[lip-smack]`\n"
-            "Respiración: `[breath]`, `[inhale]`, `[exhale]`, `[sigh]`"
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="Etiquetas envolventes `<tag>texto</tag>`",
-        value=(
-            "Volumen: `<soft>`, `<whisper>`, `<loud>`, `<build-intensity>`, `<decrease-intensity>`\n"
-            "Tono/velocidad: `<higher-pitch>`, `<lower-pitch>`, `<slow>`, `<fast>`\n"
-            "Estilo: `<sing-song>`, `<singing>`, `<laugh-speak>`, `<emphasis>`"
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="Ejemplos",
-        value=(
-            "1. Inline: `Entré y [pause] ahí estaba. [laugh] ¡No podía creerlo!`\n"
-            "2. Envolvente: `Tengo que contarte algo. <whisper>Es un secreto.</whisper> ¿Genial, no?`\n"
-            "3. Combinado: `<slow><soft>Buenas noches, descansa bien.</soft></slow>`"
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="Consejos",
-        value=(
-            "• Envuelve frases completas con etiquetas de volumen/tono\n"
-            "• Coloca etiquetas inline donde irían naturalmente en el habla\n"
-            "• Puedes combinar varias etiquetas"
-        ),
-        inline=False,
     )
     embed.set_footer(text="Documentación xAI TTS · Speech Tags")
     return embed

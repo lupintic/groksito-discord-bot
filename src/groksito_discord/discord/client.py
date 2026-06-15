@@ -66,7 +66,9 @@ from ..utils.text import extract_urls_from_text
 # via the image_delivery direct-delivery tracker; no duplication of generation or bubble logic).
 from ..media.delivery import register_image_request
 from ..media.audio_handler import (
+    AUDIO_WRAPPING_TAGS,
     _tool_generate_audio,
+    apply_wrapping_speech_tag,
     build_audio_speech_tags_embed,
     prepare_text_from_interaction,
 )
@@ -533,11 +535,12 @@ def register_slash_commands(
     # - Ephemeral confirmation after; the voice bubble itself is delivered publicly in channel.
     @tree.command(
         name="audio",
-        description="Genera audio TTS con voces Grok. Soporta Speech Tags ([pause], <whisper>). Responde a un mensaje.",
+        description="Genera audio TTS. Inline: [pause][laugh][sigh]. Elige estilo envolvente. Responde a un mensaje.",
     )
     @discord.app_commands.describe(
-        text="Texto a convertir en audio. Soporta Speech Tags de xAI: [pause], <whisper>secreto</whisper>, etc.",
+        text="Texto a leer. Inline: [pause], [laugh], [sigh], [breath], [chuckle], [long-pause], etc.",
         voice="Voz de Grok para el audio (eve recomendada).",
+        estilo="Estilo envolvente opcional: whisper, soft, slow, loud, emphasis, singing, etc.",
     )
     @discord.app_commands.choices(
         voice=[
@@ -546,12 +549,17 @@ def register_slash_commands(
             discord.app_commands.Choice(name="Rex (profesional)", value="rex"),
             discord.app_commands.Choice(name="Sal (equilibrada)", value="sal"),
             discord.app_commands.Choice(name="Leo (autoritativa)", value="leo"),
-        ]
+        ],
+        estilo=[
+            discord.app_commands.Choice(name=label, value=tag)
+            for label, tag in AUDIO_WRAPPING_TAGS
+        ],
     )
     async def audio_slash(
         interaction: discord.Interaction,
         text: Optional[str] = None,
         voice: Optional[discord.app_commands.Choice[str]] = None,
+        estilo: Optional[discord.app_commands.Choice[str]] = None,
     ):
         # Guild whitelist (same as every other slash command)
         if interaction.guild and not is_guild_allowed(interaction.guild.id):
@@ -582,6 +590,9 @@ def register_slash_commands(
             )
             return
 
+        selected_style = estilo.value if estilo else None
+        final_text = apply_wrapping_speech_tag(final_text, selected_style)
+
         # Resolve voice (user choice or config default) + language
         selected_voice = voice.value if voice else getattr(settings, "tts_default_voice", "eve") or "eve"
         selected_lang = getattr(settings, "tts_default_language", "es") or "es"
@@ -610,8 +621,9 @@ def register_slash_commands(
 
         # Ephemeral confirmation to the user who ran the command (the audio itself is public via direct delivery)
         if result and "SUCCESS" in result:
+            style_note = f" · estilo **{selected_style}**" if selected_style else ""
             await interaction.followup.send(
-                f"✅ Audio generado con la voz **{selected_voice}** y enviado al canal.",
+                f"✅ Audio generado con la voz **{selected_voice}**{style_note} y enviado al canal.",
                 ephemeral=True,
             )
         else:
