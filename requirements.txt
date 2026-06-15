@@ -13,6 +13,9 @@ discord.py>=2.7.0,<3.0  # Targeting recent discord.py for full voice message sup
 # HTTP client for direct xAI image/video generation endpoints
 httpx>=0.27.0
 
+# Fast fuzzy string matching for Steam game name resolution
+rapidfuzz>=3.0.0
+
 # OpenAI-compatible client for xAI Responses API (web_search, x_search, Grok reasoning)
 openai>=1.30.0
 
