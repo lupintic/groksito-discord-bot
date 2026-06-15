@@ -2,7 +2,7 @@
 
 import pytest
 
-from groksito_discord.llm_utils import _build_native_search_tools
+from groksito_discord.llm.llm_utils import _build_native_search_tools
 
 
 def test_normal_turn_offers_both_search_tools():

@@ -15,7 +15,7 @@ SRC = Path(__file__).resolve().parent / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from groksito_discord.env_utils import (
+from groksito_discord.utils.env_utils import (
     safe_write_env,
     parse_env_file,
     parse_env_lines,

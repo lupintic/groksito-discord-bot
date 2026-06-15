@@ -10,7 +10,7 @@ with the same arguments the LLM layer would pass.
 
 import pytest
 
-from groksito_discord.tools import (
+from groksito_discord.llm.tools import (
     get_tools_for_request,
     get_continuation_tools,
     get_heavy_tools,

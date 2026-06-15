@@ -52,13 +52,13 @@ except Exception:
     AudioSegment = None  # type: ignore
 
 
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 from ..config import settings
-from ..image_delivery import consume_image_request, register_image_request
+from .delivery import consume_image_request, register_image_request
 
 # Bearer resolution (OAuth preferred)
 try:
-    from ..grok_oauth import get_grok_bearer
+    from ..core.grok_oauth import get_grok_bearer
 except Exception:
     get_grok_bearer = None  # type: ignore
 

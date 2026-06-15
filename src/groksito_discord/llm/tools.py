@@ -22,10 +22,10 @@ import asyncio
 import logging
 from typing import Any
 
-from .correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
-from . import context
-from .image_delivery import register_image_request, consume_image_request
+from .. import context
+from ..media.delivery import register_image_request, consume_image_request
 from .media_tools import (
     _generate_video_schema,
     _handle_generate_video,

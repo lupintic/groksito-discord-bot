@@ -14,7 +14,7 @@ This file only re-exports for any code that was importing directly from the old 
 
 from __future__ import annotations
 
-from .media.image_handler import (
+from .image_handler import (
     _handle_generate_image,
     _tool_generate_image,
     soften_image_prompt,

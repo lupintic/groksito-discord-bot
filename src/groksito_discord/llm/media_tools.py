@@ -16,7 +16,7 @@ Implementation lives in:
 
 from __future__ import annotations
 
-from .config import settings
+from ..config import settings
 
 
 # =============================================================================
@@ -31,13 +31,13 @@ ENABLE_VIDEO_GENERATION: bool = settings.enable_video_generation
 # =============================================================================
 
 # Video — now served from the dedicated modern handler (following the image_handler pattern)
-from .media.video_handler import (
+from ..media.video_handler import (
     _generate_video_schema,
     _handle_generate_video,
 )
 
 # Image generation & editing — now served from the dedicated modern handler
-from .media.image_handler import (
+from ..media.image_handler import (
     _handle_generate_image,
     _handle_edit_image,
 )
@@ -45,13 +45,13 @@ from .media.image_handler import (
 # Audio / TTS — served from dedicated handler (src/groksito_discord/media/audio_handler.py)
 # The handler resolves tts_default_voice / tts_default_language from settings (pydantic + .env, editable in web UI)
 # with sensible fallbacks ("eve", "es"). Language is required by the official /v1/tts API.
-from .media.audio_handler import (
+from ..media.audio_handler import (
     _generate_audio_schema,
     _handle_generate_audio,
 )
 
 # Optional: re-export the new prompt enhancer for advanced use / tests
-from .media.image_handler import _enhance_prompt_for_api, soften_image_prompt
+from ..media.image_handler import _enhance_prompt_for_api, soften_image_prompt
 
 # =============================================================================
 # Explicit Video Intent Detection

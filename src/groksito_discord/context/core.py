@@ -21,14 +21,14 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
 from ..config import settings
 
 # Light intent predicates (post #22/#24 cleanup of heavy classification).
 # Only the small essential helpers are imported. All heavy keyword lists,
 # tiering rules, and the classify_query_context_need function itself removed.
-from ..intents import (
+from ..core.intent import (
     is_conversation_meta_question,
     is_pure_image_generation_request,
     should_generate_recent_summary,

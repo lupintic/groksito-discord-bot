@@ -36,7 +36,7 @@ dev = [
 where = ["src"]
 
 [project.scripts]
-groksito = "groksito_discord.bot:run"
+groksito = "groksito_discord.main:run"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

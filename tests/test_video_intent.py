@@ -9,7 +9,7 @@ expensive video endpoint.
 
 import pytest
 
-from groksito_discord.media_tools import has_explicit_video_intent
+from groksito_discord.llm.media_tools import has_explicit_video_intent
 
 
 class TestHasExplicitVideoIntent:

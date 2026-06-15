@@ -19,12 +19,12 @@ import os
 import time
 from typing import Any, Optional
 
-from .correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionError, APIError
 
-from .config import settings
-from .image_delivery import DIRECT_DELIVERY_PERFORMED
+from ..config import settings
+from ..media.delivery import DIRECT_DELIVERY_PERFORMED
 from .tools import (
     get_tools_for_request,
     log_tool_selection,
@@ -36,7 +36,7 @@ from .media_tools import has_explicit_video_intent, has_explicit_audio_intent
 
 # Import from the new sibling modules (clean separation)
 from .llm_input import build_responses_input
-from .context import should_offer_light_decision_tools
+from ..context import should_offer_light_decision_tools
 from .llm_utils import (
     _extract_final_text,
     _build_stub_response,
@@ -53,13 +53,13 @@ from .llm_utils import (
 
 # Lightweight Skills + Decision layer (normal chat). Lazy imports inside functions to avoid cycles.
 try:
-    from .config import settings as _settings
+    from ..config import settings as _settings
 except Exception:
     _settings = None  # type: ignore
 
 # OAuth / unified bearer support (lazy; central resolver prefers OAuth token when available)
 try:
-    from .grok_oauth import get_grok_bearer as _get_grok_bearer
+    from ..core.grok_oauth import get_grok_bearer as _get_grok_bearer
 except Exception:
     _get_grok_bearer = None  # type: ignore
 
@@ -606,7 +606,7 @@ async def call_grok_for_groksito(
                 # model decide. Non-intrusive, best-effort, no sensitive values logged, trivial to remove.
                 # Uses tools_logger to match other structured tool/decision logs (log_tool_selection etc).
                 try:
-                    from .config import settings as _s
+                    from ..config import settings as _s
                     if getattr(_s, "log_tool_selection", True):
                         from .tools import tools_logger as _tl
                         DECISION_TOOL_NAMES = {
@@ -831,7 +831,7 @@ async def call_grok_for_groksito(
         if is_addressed and addressed_turn_start is not None:
             try:
                 latency_ms = (time.time() - addressed_turn_start) * 1000.0
-                from .token_usage import log_addressed_turn_metrics
+                from ..utils.token_usage import log_addressed_turn_metrics
                 log_addressed_turn_metrics(
                     latency_ms=latency_ms,
                     prompt_tokens=first_turn_prompt_tokens,
@@ -926,7 +926,7 @@ async def call_grok_for_groksito(
                 # Common with expired/revoked OAuth or tier gates on the oauth surface
                 hint = ""
                 try:
-                    from .grok_oauth import get_grok_bearer
+                    from ..core.grok_oauth import get_grok_bearer
                     if settings.auth_prefers_oauth or settings.using_oauth:
                         hint = " (OAuth token may be invalid/expired or tier-restricted ΓÇö try `python -m src.groksito_discord --login-oauth` or switch to XAI_API_KEY)"
                 except Exception:

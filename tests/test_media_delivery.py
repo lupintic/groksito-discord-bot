@@ -48,7 +48,7 @@ async def test_deliver_from_request_downloads_urls():
     orig_msg.channel = MagicMock(id=2)
 
     with patch(
-        "groksito_discord.image_delivery.consume_image_request",
+        "groksito_discord.media.delivery.consume_image_request",
         new_callable=AsyncMock,
         return_value={"original_message": orig_msg},
     ), patch(

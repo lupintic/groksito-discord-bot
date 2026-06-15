@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import settings
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
 logger = logging.getLogger("groksito.skills")
 

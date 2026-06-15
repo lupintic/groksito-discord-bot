@@ -1,11 +1,13 @@
 """
-Centralized Discord media delivery for Groksito.
+Media delivery for Groksito.
 
-Downloads generated/edited media from transient xAI URLs and delivers them as
-real Discord file attachments instead of expiring links in message text.
+Combines:
+1. In-memory request tracking (register/consume) for concurrent media operations
+2. Discord attachment delivery — downloads transient xAI URLs and sends discord.File
+   attachments instead of expiring links in message text
 
-Used by image_handler, video_handler, and (optionally) audio_handler for a
-unified direct-delivery UX with the DIRECT_DELIVERY_PERFORMED sentinel pattern.
+Used by image_handler, video_handler, audio_handler, and the DIRECT_DELIVERY_PERFORMED
+sentinel pattern in llm/client.py and core/conversation.py.
 """
 
 from __future__ import annotations
@@ -13,18 +15,98 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
+import uuid
 from io import BytesIO
-from typing import Any
+from typing import Any, Optional, TypedDict
 from urllib.parse import urlparse
 
 import discord
 import httpx
 
-from ..correlation import cid_prefix
 from ..config import settings
+from ..utils.correlation import cid_prefix
 
 logger = logging.getLogger("groksito.media.delivery")
 
+
+class PendingImageRequest(TypedDict):
+    """Structural documentation for entries in the in-memory pending media request map."""
+    user_id: int
+    channel_id: int
+    message_id: int
+    operation_type: str
+    timestamp: float
+    original_message: Any
+
+
+# =============================================================================
+# Direct Delivery Sentinel
+# =============================================================================
+
+DIRECT_DELIVERY_PERFORMED = object()
+
+
+# =============================================================================
+# Request tracking (register / consume)
+# =============================================================================
+
+_pending_image_requests: dict[str, PendingImageRequest] = {}
+_image_request_lock = asyncio.Lock()
+_IMAGE_REQUEST_TTL = 90  # seconds
+
+
+async def register_image_request(
+    *,
+    user_id: int,
+    channel_id: int,
+    message_id: int,
+    operation_type: str,
+    original_message: Any,
+) -> str:
+    """Register a pending media operation and return a unique request_id."""
+    async with _image_request_lock:
+        await _cleanup_expired_image_requests()
+        request_id = f"media_{uuid.uuid4().hex[:10]}"
+        _pending_image_requests[request_id] = {
+            "user_id": user_id,
+            "channel_id": channel_id,
+            "message_id": message_id,
+            "operation_type": operation_type,
+            "timestamp": time.time(),
+            "original_message": original_message,
+        }
+        logger.info(
+            f"{cid_prefix()}[MediaDelivery] Registered {operation_type} request "
+            f"{request_id} for user {user_id} msg {message_id}"
+        )
+        return request_id
+
+
+async def consume_image_request(request_id: str) -> Optional[dict[str, Any]]:
+    """Retrieve and remove a pending request. Returns None if missing or expired."""
+    async with _image_request_lock:
+        await _cleanup_expired_image_requests()
+        info = _pending_image_requests.pop(request_id, None)
+        if info:
+            logger.debug(f"{cid_prefix()}[MediaDelivery] Consumed request {request_id}")
+        return info
+
+
+async def _cleanup_expired_image_requests() -> None:
+    now = time.time()
+    expired = [
+        rid for rid, info in _pending_image_requests.items()
+        if now - info.get("timestamp", 0) > _IMAGE_REQUEST_TTL
+    ]
+    for rid in expired:
+        _pending_image_requests.pop(rid, None)
+        logger.debug(f"{cid_prefix()}[MediaDelivery] Cleaned expired request {rid}")
+
+
+# =============================================================================
+# Discord attachment delivery
+# =============================================================================
 
 def build_image_caption(prompt: str | None = None) -> str:
     """Short, natural caption for image delivery (no URLs)."""
@@ -84,7 +166,6 @@ async def _download_url(url: str) -> bytes | None:
 
 
 async def _download_urls(urls: list[str]) -> list[tuple[bytes, str]]:
-    """Download URLs in parallel; return (bytes, filename) pairs for successful downloads."""
     if not urls:
         return []
 
@@ -108,12 +189,7 @@ async def deliver_media_to_message(
     files: list[discord.File] | None = None,
     kind: str = "image",
 ) -> bool:
-    """
-    Deliver media as Discord attachments on a reply to orig_msg.
-
-    Prefers pre-built discord.File objects; otherwise downloads from urls.
-    Returns True on successful delivery.
-    """
+    """Deliver media as Discord attachments on a reply to orig_msg."""
     if not orig_msg:
         return False
 
@@ -168,8 +244,6 @@ async def deliver_from_request(
     """Consume a pending request and deliver media to its original message."""
     if not request_id:
         return False
-
-    from ..image_delivery import consume_image_request
 
     info = await consume_image_request(request_id)
     if not info:

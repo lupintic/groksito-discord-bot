@@ -14,7 +14,7 @@ This file only re-exports for any code that was importing directly from the old 
 
 from __future__ import annotations
 
-from .media.video_handler import (
+from .video_handler import (
     _generate_video_schema,
     _handle_generate_video,
     _tool_generate_video,

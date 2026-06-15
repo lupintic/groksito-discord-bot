@@ -35,14 +35,13 @@ from typing import Any, Optional
 
 import httpx
 
-from ..correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 from ..config import settings
-from ..image_delivery import register_image_request
-from .delivery import build_video_caption, deliver_from_request
+from .delivery import build_video_caption, deliver_from_request, register_image_request
 
 # Bearer (OAuth preferred)
 try:
-    from ..grok_oauth import get_grok_bearer
+    from ..core.grok_oauth import get_grok_bearer
 except Exception:
     get_grok_bearer = None  # type: ignore
 

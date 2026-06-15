@@ -5,7 +5,8 @@ This module provides a single source of truth for all environment variables,
 with validation and sensible defaults.
 
 Usage:
-    from .config import settings
+    from . import settings
+    # or after install: from groksito_discord.config import settings
 
     token = settings.discord_bot_token
     data_dir = settings.data_dir
@@ -299,7 +300,7 @@ class GroksitoSettings(BaseSettings):
         # Even in api_key mode, if a token file exists we still let the central bearer prefer it (best-effort "use what you have").
         # This makes "login once, it just works" the default UX without forcing users to flip the env var.
         try:
-            from .grok_oauth import load_oauth_tokens
+            from ..core.grok_oauth import load_oauth_tokens
             return bool(load_oauth_tokens())
         except Exception:
             return False

@@ -18,11 +18,11 @@ from __future__ import annotations
 import logging
 from typing import Any, TypedDict
 
-from .correlation import cid_prefix
+from ..utils.correlation import cid_prefix
 
-from .config import settings
-from .prompt import SYSTEM_PROMPT
-from .context import (
+from ..config import settings
+from .prompt_builder import SYSTEM_PROMPT
+from ..context import (
     is_pure_image_generation_request,
 )
 
@@ -46,10 +46,10 @@ def _classify_query_context_need(text: str, is_reply_continuation: bool = False)
     # casual/minimal paths still exist for ultra-short non-queries via the
     # forcing logic below).
     return "normal"
-from .token_usage import log_context_injection
+from ..utils.token_usage import log_context_injection
 
 # Centralized vision URL safety filter (prevents X/Twitter pbs.twimg.com 404s on Responses vision; see #40)
-from .utils.text import filter_unreliable_vision_urls
+from ..utils.text import filter_unreliable_vision_urls
 
 
 class ResponsesInputData(TypedDict):
