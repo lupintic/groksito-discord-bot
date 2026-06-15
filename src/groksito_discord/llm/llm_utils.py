@@ -45,6 +45,7 @@ from ..utils.token_usage import (
 from ..core.intent import (
     _detect_visual_intent,
     _detect_image_creation_intent,
+    is_image_edit_request,
 )
 
 logger = logging.getLogger("groksito.llm")

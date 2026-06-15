@@ -20,6 +20,7 @@ from .. import context
 from .safety import safe_reply
 # No custom memory (fully removed for maximum nativeness)
 from ..media.delivery import DIRECT_DELIVERY_PERFORMED
+from ..core.intent import is_image_edit_request
 from ..llm.llm_utils import _detect_image_creation_intent
 
 # Centralized text utilities (Phase 2). Aliases preserve the original private
@@ -182,9 +183,20 @@ async def _resolve_referenced_and_activation(
     # activation + harvest chain + analysis cases). creation_intent controls only
     # whether we advertise generate_image/edit_image etc to avoid tool bloat in mixed cases.
     user_text = getattr(message, "content", "") or ""
-    has_image_creation_intent = _detect_image_creation_intent(user_text)
+    has_current_image_attachment = referenced_has_media_attachments(message)
+    has_image_creation_intent = _detect_image_creation_intent(
+        user_text,
+        has_reference_image=has_current_image_attachment
+        or (referenced is not None and referenced_has_media_attachments(referenced)),
+    )
     if has_image_creation_intent:
         logger.info(f"{cid_p}[Intent] Image creation/edit intent detected (will offer gen/edit tools)")
+
+    # Direct @mention / reply-to-bot with an image on the current message (not only referenced).
+    if has_current_image_attachment and (is_mentioned_now or is_reply_to_bot):
+        if is_image_edit_request(user_text, has_reference_image=True):
+            explicit_visual_reply_intent = True
+            logger.info(f"{cid_p}[Mention] Image edit/transform on attached image (addressed turn)")
 
     return referenced, is_reply_to_bot, explicit_visual_reply_intent, is_reply_continuation, has_x_link_intent, has_image_creation_intent
 

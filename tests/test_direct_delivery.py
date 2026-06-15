@@ -63,10 +63,6 @@ def test_media_success_strings_contain_detector_phrases():
         "delivered directly to the user",
         "clean direct message delivered to the user",
         "policy blocked; clean direct message delivered",
-        # Also the broader fallbacks in llm.py
-        "delivered directly",
-        "success:",
-        "policy blocked",
     ]
 
     for s in KNOWN_DIRECT_SUCCESS_STRINGS:

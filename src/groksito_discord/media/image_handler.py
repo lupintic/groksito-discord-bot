@@ -27,17 +27,20 @@ and the DIRECT_DELIVERY_PERFORMED sentinel pattern.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import re
 import unicodedata
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 
 from ..utils.correlation import cid_prefix
 from ..config import settings
 from .delivery import (
+    _download_url,
     build_edit_caption,
     build_image_caption,
     consume_image_request,
@@ -579,12 +582,60 @@ def _validate_edit_references(reference_urls: list[str] | None) -> str | None:
     return None
 
 
+def _guess_image_mime(url: str, data: bytes) -> str:
+    path = urlparse(url).path.lower()
+    if path.endswith(".png") or data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if path.endswith(".webp") or (len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"):
+        return "image/webp"
+    if path.endswith(".gif") or data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return "image/jpeg"
+
+
+def _needs_base64_for_edit_api(url: str) -> bool:
+    """Discord CDN URLs are signed and often unreachable by xAI's edits fetcher."""
+    host = (urlparse(url).hostname or "").lower()
+    return any(
+        marker in host
+        for marker in ("discordapp.com", "discordapp.net", "discord.com")
+    )
+
+
+async def _resolve_edit_reference_url(url: str) -> str:
+    """Return a public URL or base64 data URI that the xAI edits API can fetch."""
+    if not url or not _needs_base64_for_edit_api(url):
+        return url
+
+    data = await _download_url(url)
+    if not data:
+        logger.warning(f"{cid_prefix()}[Image] Could not download Discord reference for edit; using raw URL")
+        return url
+
+    mime = _guess_image_mime(url, data)
+    encoded = base64.b64encode(data).decode("ascii")
+    logger.info(f"{cid_prefix()}[Image] Resolved Discord reference to base64 data URI ({len(data)} bytes)")
+    return f"data:{mime};base64,{encoded}"
+
+
+async def _resolve_edit_reference_urls(reference_urls: list[str]) -> list[str]:
+    resolved: list[str] = []
+    for url in reference_urls[:3]:
+        resolved.append(await _resolve_edit_reference_url(url))
+    return resolved
+
+
 def _build_edit_payload(prompt: str, refs: list[str], aspect_ratio: str | None, **extra: Any) -> dict:
+    image_entries = [{"url": url, "type": "image_url"} for url in refs]
     payload: dict = {
         "model": extra.get("model", "grok-imagine-image-quality"),
         "prompt": prompt,
-        "images": [{"type": "image_url", "url": url} for url in refs],
+        "response_format": "url",
     }
+    if len(image_entries) == 1:
+        payload["image"] = image_entries[0]
+    else:
+        payload["images"] = image_entries
     if aspect_ratio:
         payload["aspect_ratio"] = aspect_ratio
     for k in ("quality", "style"):
@@ -649,6 +700,7 @@ async def _tool_edit_image(
         return validation_error
 
     refs = (reference_urls or [])[:3]
+    refs = await _resolve_edit_reference_urls(refs)
     # Enhance the user's edit instruction (modern quality pass)
     enhanced_prompt = _enhance_prompt_for_api(prompt, is_edit=True)
 
@@ -693,7 +745,11 @@ async def _tool_edit_image(
         if await _try_direct_edit_delivery(request_id, urls):
             return "SUCCESS: Edited image(s) delivered directly to the user."
 
-        return "SUCCESS - Image(s) edited using the references. Include the URLs in your final response:\n" + "\n".join(urls)
+        return (
+            "EDIT_URLS_READY (direct Discord delivery failed). "
+            "Include these edited image URLs in your final response:\n"
+            + "\n".join(urls)
+        )
 
     except Exception as e:
         logger.exception(f"{cid_prefix()}[Image] Unexpected error in edit")

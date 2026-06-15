@@ -50,6 +50,7 @@ from ..utils.token_usage import log_context_injection
 
 # Centralized vision URL safety filter (prevents X/Twitter pbs.twimg.com 404s on Responses vision; see #40)
 from ..utils.text import filter_unreliable_vision_urls
+from ..core.intent import is_image_edit_request
 
 
 class ResponsesInputData(TypedDict):
@@ -102,6 +103,13 @@ def _build_multimodal_user_content(
 
     content: list[dict] = []
     text = (user_message or "").strip()
+    if is_image_edit_request(text, has_reference_image=True):
+        text = (
+            f"{text}\n\n"
+            "[System note: The user attached a reference image and wants a visual transformation. "
+            "You MUST call the edit_image tool with their instructions. Do not describe a finished "
+            "edit in text alone — the tool delivers the edited image as an attachment.]"
+        ).strip()
     content.append({"type": "input_text", "text": text})
 
     for url in safe_urls[:3]:

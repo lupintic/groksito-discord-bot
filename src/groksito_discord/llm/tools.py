@@ -116,7 +116,13 @@ def _edit_image_schema() -> dict:
     return {
         "type": "function",
         "name": "edit_image",
-        "description": "Edit or transform a reference image according to artistic or stylistic instructions (e.g. change style, mood, clothing, setting, or apply creative variations). The reference image provides the visual base. Guide toward artistic/stylized outcomes; avoid requests that would require explicit or sexual anatomical changes on the provided reference.",
+        "description": (
+            "Edit or transform the user's attached/reference image(s). REQUIRED when the user asks to modify, "
+            "retouch, or restyle an uploaded or referenced photo (hair, makeup, clothing, mood, background, etc.). "
+            "Reference images are already available from the user's message — call this tool with the transformation "
+            "prompt. Do NOT claim an edited image is ready without calling this tool; successful calls deliver the "
+            "result as a Discord attachment automatically."
+        ),
         "parameters": {
             "type": "object",
             "properties": {

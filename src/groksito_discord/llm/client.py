@@ -44,6 +44,7 @@ from .llm_utils import (
     _build_native_search_tools,
     _detect_visual_intent,
     _detect_image_creation_intent,
+    is_image_edit_request,
     _infer_tools_set_name,
     _extract_and_log_token_usage,
     _maybe_proactive_summarize,
@@ -219,7 +220,14 @@ async def call_grok_for_groksito(
         # === Smart Tool Selection + Native Tools ===
         # has_visual_intent from upstream is now STRICT image *creation/edit* intent (not just "image present").
         # We keep a separate broader signal only for enabling image_understanding / image_search flags on native web_search.
-        creation_visual_intent = has_visual_intent or _detect_image_creation_intent(user_message_text)
+        creation_visual_intent = (
+            has_visual_intent
+            or _detect_image_creation_intent(
+                user_message_text,
+                has_reference_image=bool(image_urls),
+            )
+            or (bool(image_urls) and is_image_edit_request(user_message_text, has_reference_image=True))
+        )
 
         # Broader signal: presence of images (for vision) OR query mentions visuals -> controls img_* flags on search tools.
         # This allows useful vision+search in mixed cases (image in reply + current events question) without
@@ -537,8 +545,7 @@ async def call_grok_for_groksito(
                 logger.info(f"{cid_p}[LLM] Direct delivery SUCCESS for tool '{tool_name}' ΓÇö suppressing final text reply")
                 return True
 
-            if "delivered directly" in lowered or "sent directly" in lowered or "success:" in lowered or "policy blocked" in lowered:
-                logger.info(f"{cid_p}[LLM] Direct delivery detected for tool '{tool_name}' ΓÇö suppressing final text reply")
+            if "policy blocked" in lowered and "clean direct message delivered" in lowered:
                 return True
             return False
 
