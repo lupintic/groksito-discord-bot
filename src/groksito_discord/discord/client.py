@@ -67,6 +67,7 @@ from ..utils.text import extract_urls_from_text
 from ..media.delivery import register_image_request
 from ..media.audio_handler import (
     _tool_generate_audio,
+    build_audio_speech_tags_embed,
     prepare_text_from_interaction,
 )
 
@@ -532,7 +533,11 @@ def register_slash_commands(
     # - Ephemeral confirmation after; the voice bubble itself is delivered publicly in channel.
     @tree.command(
         name="audio",
-        description="Genera audio hablado (TTS) usando voces de Grok. Responde a un mensaje para leerlo.",
+        description="Genera audio TTS con voces Grok. Soporta Speech Tags ([pause], <whisper>). Responde a un mensaje.",
+    )
+    @discord.app_commands.describe(
+        text="Texto a convertir en audio. Soporta Speech Tags de xAI: [pause], <whisper>secreto</whisper>, etc.",
+        voice="Voz de Grok para el audio (eve recomendada).",
     )
     @discord.app_commands.choices(
         voice=[
@@ -572,7 +577,7 @@ def register_slash_commands(
 
         if not final_text:
             await interaction.followup.send(
-                "Por favor proporciona texto o responde a un mensaje para leerlo en voz alta.",
+                embed=build_audio_speech_tags_embed(),
                 ephemeral=True,
             )
             return

@@ -691,6 +691,63 @@ async def _handle_generate_audio(args: dict, original_message: Any) -> str:
 # Slash Command Support (reuses 100% of core TTS + delivery logic)
 # =============================================================================
 
+XAI_TTS_DOCS_URL = "https://docs.x.ai/developers/model-capabilities/audio/text-to-speech"
+
+
+def build_audio_speech_tags_embed() -> discord.Embed:
+    """Build a help embed explaining xAI Speech Tags for the /audio slash command."""
+    embed = discord.Embed(
+        title="🔊 /audio — Text-to-Speech con Speech Tags",
+        url=XAI_TTS_DOCS_URL,
+        description=(
+            "Convierte texto en audio con voces de Grok (eve, ara, rex, sal, leo). "
+            "Puedes **responder a un mensaje** para leerlo, o escribir el texto directamente.\n\n"
+            "Las **Speech Tags** de xAI controlan pausas, risas, volumen, tono y más. "
+            "Inclúyelas en el campo `texto` del comando."
+        ),
+        color=0x5865F2,
+    )
+    embed.add_field(
+        name="Etiquetas inline `[tag]`",
+        value=(
+            "Pausas: `[pause]`, `[long-pause]`, `[hum-tune]`\n"
+            "Risa/llanto: `[laugh]`, `[chuckle]`, `[giggle]`, `[cry]`\n"
+            "Boca: `[tsk]`, `[tongue-click]`, `[lip-smack]`\n"
+            "Respiración: `[breath]`, `[inhale]`, `[exhale]`, `[sigh]`"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Etiquetas envolventes `<tag>texto</tag>`",
+        value=(
+            "Volumen: `<soft>`, `<whisper>`, `<loud>`, `<build-intensity>`, `<decrease-intensity>`\n"
+            "Tono/velocidad: `<higher-pitch>`, `<lower-pitch>`, `<slow>`, `<fast>`\n"
+            "Estilo: `<sing-song>`, `<singing>`, `<laugh-speak>`, `<emphasis>`"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Ejemplos",
+        value=(
+            "1. Inline: `Entré y [pause] ahí estaba. [laugh] ¡No podía creerlo!`\n"
+            "2. Envolvente: `Tengo que contarte algo. <whisper>Es un secreto.</whisper> ¿Genial, no?`\n"
+            "3. Combinado: `<slow><soft>Buenas noches, descansa bien.</soft></slow>`"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Consejos",
+        value=(
+            "• Envuelve frases completas con etiquetas de volumen/tono\n"
+            "• Coloca etiquetas inline donde irían naturalmente en el habla\n"
+            "• Puedes combinar varias etiquetas"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Documentación xAI TTS · Speech Tags")
+    return embed
+
+
 async def prepare_text_from_interaction(
     interaction: discord.Interaction, provided_text: str = ""
 ) -> str:
