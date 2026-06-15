@@ -99,6 +99,18 @@ class GroksitoSettings(BaseSettings):
     )
 
     # -------------------------------------------------------------------------
+    # Twitch (Helix API — powers /versus viewer counts)
+    # -------------------------------------------------------------------------
+    twitch_client_id: str | None = Field(
+        default=None,
+        description="Twitch application Client ID for Helix API (optional; /versus works without Twitch data if unset)",
+    )
+    twitch_client_secret: str | None = Field(
+        default=None,
+        description="Twitch application Client Secret for app access token (optional)",
+    )
+
+    # -------------------------------------------------------------------------
     # Feature Flags
     # -------------------------------------------------------------------------
     enable_video_generation: bool = Field(

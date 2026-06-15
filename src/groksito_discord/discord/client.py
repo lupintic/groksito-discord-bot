@@ -54,10 +54,9 @@ except Exception:
 from ..config import settings
 from ..core.safety import safe_reply as _safe_reply
 
-# Steam integration (extracted in Phase 1 for client hygiene).
-# All data fetching, game resolution, and scraping logic lives in
-# src/groksito_discord/discord/integrations/steam.py. Behavior is identical.
-from .integrations import steam
+# Steam + Twitch integrations (extracted for client hygiene).
+# Data fetching and game resolution live in discord/integrations/.
+from .integrations import steam, twitch
 
 # Centralized text utilities (Phase 2). Replaces inline URL extraction that
 # duplicated logic from conversation.py.
@@ -129,6 +128,165 @@ class RateLimiter:
         while user_records and now - user_records[0] > self.window:
             user_records.popleft()
         return max(0, self.max_requests - len(user_records))
+
+
+# =============================================================================
+# Versus embed builder (/versus)
+# =============================================================================
+_VERSUS_COLORS = (0x3498DB, 0xE74C3C)  # blue vs red
+_VERSUS_EMOJIS = ("🔵", "🔴")
+
+
+def _format_metric(value: int | None, *, suffix: str = "") -> str:
+    if value is None:
+        return "No disponible"
+    return f"**{value:,}**{suffix}"
+
+
+def _build_versus_embeds(
+    game1_name: str,
+    game2_name: str,
+    steam_games: list[dict[str, Any]],
+    twitch_games: list[dict[str, Any]],
+) -> list[discord.Embed]:
+    """Build header + two side-by-side-style game embeds for /versus."""
+    steam_by_original = {g["original_name"].lower(): g for g in steam_games}
+    twitch_by_original = {g["original_name"].lower(): g for g in twitch_games}
+
+    pairs: list[tuple[str, dict[str, Any] | None, dict[str, Any] | None]] = []
+    for name in (game1_name, game2_name):
+        key = name.lower()
+        pairs.append((name, steam_by_original.get(key), twitch_by_original.get(key)))
+
+    header = discord.Embed(
+        title="⚔️ Versus",
+        description=f"**{game1_name}** vs **{game2_name}**",
+        color=0x9B59B6,
+    )
+    header.set_footer(text="Datos en vivo de Steam y Twitch")
+
+    embeds: list[discord.Embed] = [header]
+
+    for idx, (original, steam_data, twitch_data) in enumerate(pairs):
+        color = _VERSUS_COLORS[idx]
+        emoji = _VERSUS_EMOJIS[idx]
+        display_name = (
+            (steam_data or {}).get("matched_name")
+            or (twitch_data or {}).get("matched_name")
+            or original
+        )
+
+        steam_found = steam_data is not None
+        twitch_found = bool(twitch_data and twitch_data.get("found"))
+
+        if not steam_found and not twitch_found:
+            embeds.append(
+                discord.Embed(
+                    title=f"{emoji} {display_name}",
+                    description="No se encontró este juego en Steam ni en Twitch.",
+                    color=color,
+                )
+            )
+            continue
+
+        embed = discord.Embed(
+            title=f"{emoji} {display_name}",
+            color=color,
+            url=(
+                f"https://store.steampowered.com/app/{steam_data['appid']}/"
+                if steam_data and steam_data.get("appid")
+                else None
+            ),
+        )
+
+        if steam_data:
+            pc = steam_data.get("player_count")
+            steam_line = _format_metric(pc, suffix=" jugadores en Steam")
+            if steam_data.get("player_count_source") == "demo" and "demo" not in display_name.lower():
+                steam_line += " (vía Demo)"
+            embed.add_field(name="🎮 Steam", value=steam_line, inline=False)
+        else:
+            embed.add_field(
+                name="🎮 Steam",
+                value="No encontrado en Steam",
+                inline=False,
+            )
+
+        if twitch_data and twitch_data.get("configured"):
+            if twitch_found:
+                viewers = twitch_data.get("viewer_count")
+                streams = twitch_data.get("live_streams")
+                twitch_line = _format_metric(viewers, suffix=" espectadores en Twitch")
+                if isinstance(streams, int):
+                    twitch_line += f"\n{streams:,} streams en vivo"
+                embed.add_field(name="📺 Twitch", value=twitch_line, inline=False)
+            else:
+                embed.add_field(
+                    name="📺 Twitch",
+                    value="Categoría no encontrada en Twitch",
+                    inline=False,
+                )
+        elif twitch_data and not twitch_data.get("configured"):
+            embed.add_field(
+                name="📺 Twitch",
+                value="Twitch no configurado (TWITCH_CLIENT_ID/SECRET)",
+                inline=False,
+            )
+
+        thumb = None
+        if steam_data and steam_data.get("image_url"):
+            thumb = steam_data["image_url"]
+        elif twitch_data and twitch_data.get("image_url"):
+            thumb = twitch_data["image_url"]
+        if thumb:
+            embed.set_thumbnail(url=thumb)
+
+        embeds.append(embed)
+
+    # Winner callouts when both sides have comparable metrics
+    steam_counts = [
+        (pairs[i][0], (pairs[i][1] or {}).get("player_count"))
+        for i in range(2)
+        if pairs[i][1] and pairs[i][1].get("player_count") is not None
+    ]
+    if len(steam_counts) == 2:
+        if steam_counts[0][1] > steam_counts[1][1]:
+            header.add_field(
+                name="🏆 Steam",
+                value=f"**{steam_counts[0][0]}** lidera en jugadores",
+                inline=True,
+            )
+        elif steam_counts[1][1] > steam_counts[0][1]:
+            header.add_field(
+                name="🏆 Steam",
+                value=f"**{steam_counts[1][0]}** lidera en jugadores",
+                inline=True,
+            )
+        else:
+            header.add_field(name="🏆 Steam", value="¡Empate!", inline=True)
+
+    twitch_counts = [
+        (pairs[i][0], (pairs[i][2] or {}).get("viewer_count"))
+        for i in range(2)
+        if pairs[i][2] and pairs[i][2].get("found") and pairs[i][2].get("viewer_count") is not None
+    ]
+    if len(twitch_counts) == 2:
+        if twitch_counts[0][1] > twitch_counts[1][1]:
+            header.add_field(
+                name="🏆 Twitch",
+                value=f"**{twitch_counts[0][0]}** lidera en espectadores",
+                inline=True,
+            )
+        elif twitch_counts[1][1] > twitch_counts[0][1]:
+            header.add_field(
+                name="🏆 Twitch",
+                value=f"**{twitch_counts[1][0]}** lidera en espectadores",
+                inline=True,
+            )
+        else:
+            header.add_field(name="🏆 Twitch", value="¡Empate!", inline=True)
+
+    return embeds
 
 
 # =============================================================================
@@ -300,6 +458,68 @@ def register_slash_commands(
             return
 
         await interaction.followup.send(embeds=_build_steam_game_embeds(games_data))
+
+    # /versus — compare two games with live Steam player counts + Twitch viewers.
+    @tree.command(
+        name="versus",
+        description="Compara dos juegos: jugadores en Steam y espectadores en Twitch. Ej: /versus dota 2 cs2",
+    )
+    async def versus(
+        interaction: discord.Interaction,
+        juego1: str,
+        juego2: str,
+    ):
+        if interaction.guild and not is_guild_allowed(interaction.guild.id):
+            await interaction.response.send_message(
+                "Groksito no está disponible en este servidor.", ephemeral=True
+            )
+            return
+
+        g1 = (juego1 or "").strip()
+        g2 = (juego2 or "").strip()
+        if not g1 or not g2:
+            await interaction.response.send_message(
+                "Indica dos juegos para comparar. Ejemplo: `/versus dota 2 counter-strike 2`",
+                ephemeral=True,
+            )
+            return
+
+        if g1.lower() == g2.lower():
+            await interaction.response.send_message(
+                "Elige dos juegos distintos para el versus.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(thinking=True, ephemeral=False)
+
+        lookups = [
+            (g1, steam.normalize_game_name_for_lookup(g1) or g1),
+            (g2, steam.normalize_game_name_for_lookup(g2) or g2),
+        ]
+        lookup_csv = ", ".join(lookup for _, lookup in lookups)
+
+        steam_task = steam.get_steam_game_data(lookup_csv, max_games=2)
+        twitch_task = twitch.get_twitch_game_data_batch([lookup for _, lookup in lookups])
+        steam_games, twitch_games = await asyncio.gather(steam_task, twitch_task)
+
+        for i, game in enumerate(steam_games):
+            if i < len(lookups):
+                game["original_name"] = lookups[i][0]
+        for i, game in enumerate(twitch_games):
+            if i < len(lookups):
+                game["original_name"] = lookups[i][0]
+
+        if not steam_games and not any(t.get("found") for t in twitch_games):
+            await interaction.followup.send(
+                "No pude reconocer ninguno de los dos juegos en Steam ni en Twitch. "
+                "Prueba nombres como aparecen en la tienda o en Twitch "
+                "(ej. 'dota 2', 'counter-strike 2', 'Embers of the Uncrowned')."
+            )
+            return
+
+        embeds = _build_versus_embeds(g1, g2, steam_games, twitch_games)
+        await interaction.followup.send(embeds=embeds)
 
     # /audio — dedicated TTS/voice slash command.
     # - text is optional (for reply-to use case).

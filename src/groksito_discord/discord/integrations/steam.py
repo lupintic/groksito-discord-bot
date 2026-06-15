@@ -443,6 +443,42 @@ def _normalize_name(name: str) -> str:
     return s
 
 
+# Suffixes stripped before Twitch/Steam lookups when users type demo/playtest variants.
+_DEMO_SUFFIX_PATTERNS = (
+    r"\s*[-–—:]\s*demo\s*$",
+    r"\s+demo\s*$",
+    r"\s*\(demo\)\s*$",
+    r"\s*[-–—:]\s*playtest\s*$",
+    r"\s+playtest\s*$",
+    r"\s*\(playtest\)\s*$",
+    r"\s*[-–—:]\s*open\s+beta\s*$",
+    r"\s+open\s+beta\s*$",
+)
+
+
+def normalize_game_name_for_lookup(name: str) -> str:
+    """Normalize a user-provided game name for external API lookup.
+
+    Strips common demo/playtest/open-beta suffixes so queries like
+    "Embers of the Uncrowned Demo" resolve to the base title on Twitch
+    (and other services that list only the main game category).
+    """
+    if not name:
+        return ""
+    s = name.strip()
+    if not s:
+        return ""
+    changed = True
+    while changed:
+        changed = False
+        for pattern in _DEMO_SUFFIX_PATTERNS:
+            updated = re.sub(pattern, "", s, flags=re.IGNORECASE).strip()
+            if updated != s:
+                s = updated
+                changed = True
+    return s
+
+
 def _is_whole_word(needle: str, haystack: str) -> bool:
     """Return True if needle appears as a whole word/token in haystack (not inside another word)."""
     if not needle or not haystack:
