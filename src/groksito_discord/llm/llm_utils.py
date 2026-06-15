@@ -144,7 +144,8 @@ def _build_native_search_tools(
         "type": "web_search",
         "description": (
             "Search the web for current facts: news, prices, weather, sports, live data, recent events. "
-            "Skip for timeless knowledge the model already has."
+            "Skip for timeless knowledge the model already has. "
+            "Use a narrow query; keep only 1-2 key facts in the final reply (no raw dumps)."
         ),
     }
 
@@ -152,7 +153,8 @@ def _build_native_search_tools(
         "type": "x_search",
         "description": (
             "Search X (Twitter) for posts, trends, and social reactions. "
-            "Use when the user cares about X activity or shared x.com links."
+            "Use when the user cares about X activity or shared x.com links. "
+            "Keep at most 1-2 on-point posts; synthesize briefly in the final reply."
         ),
     }
 

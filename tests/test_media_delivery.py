@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 import pytest
 
+import httpx
+
 from groksito_discord.media.delivery import (
+    _download_url,
     build_edit_caption,
     build_image_caption,
     build_video_caption,
@@ -67,6 +70,36 @@ async def test_deliver_from_request_downloads_urls():
     call_args = orig_msg.reply.await_args
     assert call_args.kwargs["files"]
     assert "cdn.x.ai" not in str(call_args.args)
+
+
+@pytest.mark.asyncio
+async def test_download_url_retries_on_transient_failure():
+    call_count = 0
+
+    class FakeClient:
+        async def get(self, _url):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.ConnectError("connection reset")
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.content = b"ok-bytes"
+            return resp
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    with patch("groksito_discord.media.delivery.httpx.AsyncClient", return_value=FakeClient()), patch(
+        "groksito_discord.media.delivery.asyncio.sleep", new_callable=AsyncMock
+    ):
+        data = await _download_url("https://cdn.x.ai/image.png")
+
+    assert data == b"ok-bytes"
+    assert call_count == 2
 
 
 def test_caption_builders_contain_no_urls():

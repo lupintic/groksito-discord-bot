@@ -155,13 +155,47 @@ def _guess_filename(url: str, kind: str, index: int = 0) -> str:
 
 
 async def _download_url(url: str) -> bytes | None:
-    try:
-        async with httpx.AsyncClient(timeout=settings.api_timeout_seconds) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200 and resp.content:
-                return resp.content
-    except Exception as err:
-        logger.warning(f"{cid_prefix()}[MediaDelivery] Download failed for {url[:80]}: {err}")
+    """Download a transient xAI media URL with simple retry + backoff."""
+    max_attempts = max(2, min(getattr(settings, "api_max_retries", 3), 4))
+    last_err: Exception | None = None
+
+    for attempt in range(max_attempts):
+        try:
+            async with httpx.AsyncClient(timeout=settings.api_timeout_seconds) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200 and resp.content:
+                    return resp.content
+                if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_attempts - 1:
+                    delay = 0.4 * (2 ** attempt)
+                    logger.info(
+                        f"{cid_prefix()}[MediaDelivery] HTTP {resp.status_code} on download "
+                        f"(attempt {attempt + 1}/{max_attempts}), retry in {delay:.1f}s"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning(
+                    f"{cid_prefix()}[MediaDelivery] Download HTTP {resp.status_code} "
+                    f"for {url[:80]} (attempt {attempt + 1}/{max_attempts})"
+                )
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as err:
+            last_err = err
+            if attempt < max_attempts - 1:
+                delay = 0.4 * (2 ** attempt)
+                logger.info(
+                    f"{cid_prefix()}[MediaDelivery] Transient download error "
+                    f"{type(err).__name__} (attempt {attempt + 1}/{max_attempts}), retry in {delay:.1f}s"
+                )
+                await asyncio.sleep(delay)
+                continue
+        except Exception as err:
+            last_err = err
+            logger.warning(f"{cid_prefix()}[MediaDelivery] Download failed for {url[:80]}: {err}")
+            break
+
+    if last_err is not None:
+        logger.warning(
+            f"{cid_prefix()}[MediaDelivery] Download exhausted retries for {url[:80]}: {last_err}"
+        )
     return None
 
 

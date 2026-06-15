@@ -39,6 +39,7 @@ from .intent import (
     GENERAL_REPLY_INQUIRY_KEYWORDS,
     _has_strong_directed_reply_intent,
     _has_recent_referent_intent,
+    referenced_has_media_attachments,
 )
 
 logger = logging.getLogger("groksito.conversation")
@@ -145,14 +146,10 @@ async def _resolve_referenced_and_activation(
         # even for broader inquiries. The broadening no longer affects wake-up decisions.
         has_x_link_intent = has_specific_x or has_general_reply_inquiry
 
-        # Replying to content with images → vision/media tools available; Grok decides usage.
-        referenced_has_images = any(
-            getattr(a, "content_type", "").startswith("image/")
-            for a in (getattr(referenced, "attachments", []) or [])
-        )
-        if referenced_has_images:
+        # Replying to content with image/video attachments → vision/media tools available.
+        if referenced_has_media_attachments(referenced):
             explicit_visual_reply_intent = True
-            logger.info(f"{cid_p}[Reply] Reply to message with image attachment(s)")
+            logger.info(f"{cid_p}[Reply] Reply to message with image/video attachment(s)")
 
         if has_x_link_intent:
             logger.info(f"{cid_p}[Reply] Reply inquiry intent detected (user appears to be asking about the referenced message content)")
@@ -165,14 +162,9 @@ async def _resolve_referenced_and_activation(
         if not (message.reference and message.reference.message_id):
             logger.info(f"{cid_p}[Mention] Recent referent / inquiry language on direct mention (ensuring recent context + possible vision for referent)")
 
-    # Activation: @mention, reply-to-bot, reply-to-image, or strong directed inquiry.
+    # Activation: @mention, reply-to-bot, reply-to-media, or strong directed inquiry.
     # Plain user-to-user text replies stay silent — Grok handles intent when addressed.
-    referenced_has_images = False
-    if referenced:
-        referenced_has_images = any(
-            getattr(a, "content_type", "").startswith("image/")
-            for a in (getattr(referenced, "attachments", []) or [])
-        )
+    referenced_has_media = referenced_has_media_attachments(referenced)
 
     if is_mentioned_now:
         should_activate = True
@@ -181,9 +173,9 @@ async def _resolve_referenced_and_activation(
         if is_reply_to_bot:
             should_activate = True
             logger.info(f"{cid_p}[Activation] Direct reply to bot's own previous message from {author_display}")
-        elif referenced_has_images or explicit_visual_reply_intent:
+        elif referenced_has_media or explicit_visual_reply_intent:
             should_activate = True
-            logger.info(f"{cid_p}[Activation] Reply to other + image referent from {author_display}")
+            logger.info(f"{cid_p}[Activation] Reply to other + media referent from {author_display}")
         elif _has_strong_directed_reply_intent(message.content or ""):
             should_activate = True
             logger.info(f"{cid_p}[Activation] Reply to other + strong directed inquiry from {author_display}")
