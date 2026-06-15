@@ -142,10 +142,65 @@ def _detect_visual_intent(text: str | None) -> bool:
     return True
 
 
-def _detect_image_creation_intent(text: str | None) -> bool:
-    """Light detector for image creation intent (compat surface)."""
+def is_image_edit_request(text: str | None, *, has_reference_image: bool = False) -> bool:
+    """Detect when the user wants to transform/edit a reference image (not analyze it).
+
+    When has_reference_image is True (attached or harvested reference), we accept
+    broader Spanish imperatives like "le pones pelo..." that lack an explicit "edita".
+    """
+    if not text or len(text.strip()) < 4:
+        return False
+    t = text.lower()
+
+    analysis_neg = (
+        "qué ves", "que ves", "describe", "analiza", "quién es", "quien es",
+        "qué opinas", "que opinas", "qué piensas", "que piensas", "what do you see",
+        "who is", "describe this",
+    )
+    if any(n in t for n in analysis_neg):
+        return False
+
+    # Explicit edit / transform verbs (Spanish + English)
+    explicit = (
+        "edita", "edit ", "editar", "modifica", "modificar", "retoca", "retocar",
+        "transforma", "transformar", "cambia la imagen", "cambia la foto",
+        "cambia esta imagen", "cambia esta foto", "sobre esta imagen", "sobre esta foto",
+        "en esta imagen", "en esta foto", "a esta imagen", "a esta foto",
+        "change this image", "edit this image", "edit this photo", "transform this",
+    )
+    if any(p in t for p in explicit):
+        return True
+
+    # Imperative "apply X to the subject" — common when user attaches a portrait
+    imperative = (
+        "le pones", "le pon ", "ponle ", "póngale", "pongale", "hazle ", "hágale",
+        "agregale", "agrégale", "añadele", "añádela", "anadele", "quítale", "quitale",
+        "cámbiale", "cambiale", "dale ", "convíertela", "conviertela",
+        "put on her", "put on him", "give her", "give him", "make her", "make him",
+        "add to her", "add to his",
+    )
+    if has_reference_image and any(p in t for p in imperative):
+        return True
+
+    if has_reference_image:
+        # Appearance / styling tweaks without an explicit "edit" verb
+        styling = (
+            "pelo ", "cabello", "pecas", "rubor", "maquillaje", "makeup",
+            "vestido", "ropa", "outfit", "fondo ", "background", "estilo ",
+            "color de", "tinte", "blush", "freckles", "hair ",
+        )
+        if any(s in t for s in styling):
+            return True
+
+    return False
+
+
+def _detect_image_creation_intent(text: str | None, *, has_reference_image: bool = False) -> bool:
+    """Light detector for image creation OR edit intent (compat surface)."""
     try:
-        return is_pure_image_generation_request(text)
+        if is_pure_image_generation_request(text):
+            return True
+        return is_image_edit_request(text, has_reference_image=has_reference_image)
     except Exception:
         return False
 
