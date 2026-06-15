@@ -229,8 +229,8 @@ def referenced_has_media_attachments(message: Any | None) -> bool:
     """
     True when a Discord message has image or video file attachments.
 
-    Used for reply activation and visual follow-up intent when users reply to
-    prior media (e.g. "mejorá este video", "edita esta imagen") without @mention.
+    Used for visual follow-up intent on *addressed* turns (@mention or reply-to-bot)
+    when the referenced message has image/video attachments.
     """
     if not message:
         return False

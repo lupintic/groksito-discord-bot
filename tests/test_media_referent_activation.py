@@ -1,4 +1,4 @@
-"""Tests for media referent detection on reply activation (#48 follow-up)."""
+"""Tests for referenced_has_media_attachments helper (detection only, not activation)."""
 
 from types import SimpleNamespace
 

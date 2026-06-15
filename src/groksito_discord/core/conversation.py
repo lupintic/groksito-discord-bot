@@ -70,16 +70,14 @@ async def _resolve_referenced_and_activation(
     Determines activation intent and fetches the referenced message if present.
     Returns: (referenced_message, is_reply_to_bot, explicit_visual_reply_intent, is_reply_continuation, has_x_link_intent, has_image_creation_intent)
 
-    ACTIVATION POLICY (strict, post-bugfix):
-    - Direct @mention ΓåÆ activate
-    - Reply to one of *our* messages ΓåÆ activate
-    - Reply to *another user* ΓåÆ only activate on strong directed signals
-      (explicit visual follow-up keywords or the STRONG_DIRECTED_KEYWORDS list
-       which includes targeted questions about the referenced item + bot name mentions).
+    ACTIVATION POLICY (strict):
+    - Direct @mention → activate
+    - Reply to one of *our* messages → activate
+    - Reply to *another user* without @mention → never activate (even with images,
+      videos, or "groksito" in text). User-to-user threads must stay silent.
 
-    The broad GENERAL_REPLY_INQUIRY_KEYWORDS only affect *context quality* for
-    already-activated turns. They must never cause the bot to wake up on ordinary
-    user-to-user replies.
+    GENERAL_REPLY_INQUIRY_KEYWORDS and media referents only enrich context on
+    already-activated turns (@mention or reply-to-bot).
 
     has_x_link_intent (broadened) is still passed downstream so the LLM and vision
     harvester can provide rich referenced context + chain traversal when appropriate.
@@ -146,11 +144,10 @@ async def _resolve_referenced_and_activation(
         # even for broader inquiries. The broadening no longer affects wake-up decisions.
         has_x_link_intent = has_specific_x or has_general_reply_inquiry
 
-        # PR #49 review: wake on image *or* video referents (not just image/* MIME).
-        # Sets explicit_visual_reply_intent so vision/media tools are available downstream.
-        if referenced_has_media_attachments(referenced):
+        # Media referent enriches vision/tools only on addressed turns — never wakes alone.
+        if referenced_has_media_attachments(referenced) and (is_mentioned_now or is_reply_to_bot):
             explicit_visual_reply_intent = True
-            logger.info(f"{cid_p}[Reply] Reply to message with image/video attachment(s)")
+            logger.info(f"{cid_p}[Reply] Media referent on addressed turn (image/video attachment)")
 
         if has_x_link_intent:
             logger.info(f"{cid_p}[Reply] Reply inquiry intent detected (user appears to be asking about the referenced message content)")
@@ -163,29 +160,21 @@ async def _resolve_referenced_and_activation(
         if not (message.reference and message.reference.message_id):
             logger.info(f"{cid_p}[Mention] Recent referent / inquiry language on direct mention (ensuring recent context + possible vision for referent)")
 
-    # Activation: @mention, reply-to-bot, reply-to-media (image/video), or strong directed inquiry.
-    # Plain user-to-user text-only replies stay silent — Grok handles intent when @mentioned.
-    referenced_has_media = referenced_has_media_attachments(referenced)
-
+    # Activation: @mention or reply-to-bot only. No wake on user-to-user replies.
     if is_mentioned_now:
         should_activate = True
         logger.info(f"{cid_p}[Activation] Direct @mention in message from {author_display}")
-    elif is_reply_continuation:
-        if is_reply_to_bot:
-            should_activate = True
-            logger.info(f"{cid_p}[Activation] Direct reply to bot's own previous message from {author_display}")
-        elif referenced_has_media or explicit_visual_reply_intent:
-            should_activate = True
-            logger.info(f"{cid_p}[Activation] Reply to other + media referent from {author_display}")
-        elif _has_strong_directed_reply_intent(message.content or ""):
-            should_activate = True
-            logger.info(f"{cid_p}[Activation] Reply to other + strong directed inquiry from {author_display}")
-        else:
-            should_activate = False
-            logger.info(f"{cid_p}[Groksito] Ignoring reply from {author_display} to another user (no mention, not to bot, no media/strong signal)")
+    elif is_reply_continuation and is_reply_to_bot:
+        should_activate = True
+        logger.info(f"{cid_p}[Activation] Direct reply to bot's own previous message from {author_display}")
     else:
         should_activate = False
-        if not is_mentioned_now:
+        if is_reply_continuation:
+            logger.info(
+                f"{cid_p}[Groksito] Ignoring reply from {author_display} to another user "
+                f"(no @mention, not a reply to bot)"
+            )
+        elif not is_mentioned_now:
             logger.info(f"{cid_p}[Groksito] Ignoring non-reply message from {author_display} (no mention)")
 
     # Compute STRICT image creation/edit intent from CURRENT message text.
