@@ -277,3 +277,82 @@ def test_executor_returns_none_for_unapproved(temp_registry):
 
     inj = prepare_skill_injection(decision_skill_id=sk.id, user_message="test")
     assert inj is None
+
+
+# =============================================================================
+# Client integration (regression #57: lazy imports must use ..skills sibling path)
+# =============================================================================
+
+def test_client_has_no_broken_skills_imports():
+    """Static guard: llm/client.py must not use .skills (subpackage) imports."""
+    from pathlib import Path
+
+    client_src = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "groksito_discord"
+        / "llm"
+        / "client.py"
+    ).read_text(encoding="utf-8")
+    assert "from .skills" not in client_src
+    assert "from ..skills" in client_src
+
+
+@pytest.mark.asyncio
+async def test_client_decision_layer_resolves_skills_imports(monkeypatch, temp_registry):
+    """Integration: call_grok_for_groksito must reach make_decision without ImportError."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from groksito_discord.llm.client import call_grok_for_groksito
+    from groksito_discord.skills.decision import Decision, DecisionAction
+
+    decision_calls: list[dict] = []
+
+    async def tracking_make_decision(**kwargs):
+        decision_calls.append(kwargs)
+        return Decision(action=DecisionAction.DIRECT, needs_search="none")
+
+    monkeypatch.setattr(
+        "groksito_discord.skills.decision.make_decision",
+        tracking_make_decision,
+    )
+    monkeypatch.setattr(
+        "groksito_discord.llm.client._get_grok_bearer",
+        lambda: "fake-test-bearer",
+    )
+
+    async def fake_build_responses_input(**kwargs):
+        return {
+            "initial_input": [{"role": "user", "content": "cuántos jugadores tiene poe2"}],
+            "stable_prefix_len": 100,
+            "need": "normal",
+            "user_id": "999",
+            "user_message_text": "cuántos jugadores tiene poe2",
+        }
+
+    monkeypatch.setattr(
+        "groksito_discord.llm.client.build_responses_input",
+        fake_build_responses_input,
+    )
+
+    mock_response = MagicMock()
+    mock_response.output_text = "Respuesta de prueba"
+    mock_response.output = []
+    mock_response.usage = MagicMock(input_tokens=50)
+
+    monkeypatch.setattr(
+        "groksito_discord.llm.client._call_responses_with_retry",
+        AsyncMock(return_value=mock_response),
+    )
+
+    result = await call_grok_for_groksito(
+        user_message="cuántos jugadores tiene poe2",
+        author_name="testuser",
+        channel_id=12345,
+        is_mentioned=True,
+    )
+
+    assert result == "Respuesta de prueba"
+    assert len(decision_calls) == 1
+    assert decision_calls[0]["user_message"] == "cuántos jugadores tiene poe2"
+    assert decision_calls[0]["is_mentioned"] is True
