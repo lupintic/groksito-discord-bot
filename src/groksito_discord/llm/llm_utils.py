@@ -46,6 +46,7 @@ from ..core.intent import (
     _detect_visual_intent,
     _detect_image_creation_intent,
     is_image_edit_request,
+    needs_breadth_grounding,
 )
 
 logger = logging.getLogger("groksito.llm")
@@ -141,24 +142,43 @@ def _build_native_search_tools(
     except Exception:
         pass
 
-    # Concise schemas (prompt-driven #48); one-line efficiency hints mirror SYSTEM_PROMPT
-    # without the old lengthy "MANDATORY" blocks (PR #49 review — monitor synthesis quality).
+    # Concise schemas (prompt-driven #48); descriptions mirror SYSTEM_PROMPT completeness
+    # guidance. Breadth queries get stronger multi-search encouragement (#63).
+    breadth = needs_breadth_grounding(query_text)
+
+    if breadth:
+        web_desc = (
+            "Search the web for comprehensive, up-to-date coverage. For recommendations, "
+            "alternatives, comparisons, or multi-option questions, run multiple focused searches "
+            "(in parallel when helpful) to capture the main well-known options users expect. "
+            "Synthesize into a complete answer — cover key choices with brief context; no raw dumps."
+        )
+        x_desc = (
+            "Search X (Twitter) for posts, trends, and community takes on the topic. "
+            "Useful alongside web_search for recommendations and alternatives. "
+            "Synthesize the most relevant signals; no raw dumps."
+        )
+    else:
+        web_desc = (
+            "Search the web for current facts: news, prices, weather, sports, live data, "
+            "recent events, product/tool options, and recommendations. "
+            "Skip for timeless knowledge you're confident about. "
+            "Use focused queries; synthesize clearly in the final reply (no raw dumps)."
+        )
+        x_desc = (
+            "Search X (Twitter) for posts, trends, and social reactions. "
+            "Use when the user cares about X activity or shared x.com links. "
+            "Synthesize the relevant points in the final reply."
+        )
+
     web_tool: dict = {
         "type": "web_search",
-        "description": (
-            "Search the web for current facts: news, prices, weather, sports, live data, recent events. "
-            "Skip for timeless knowledge the model already has. "
-            "Use a narrow query; keep only 1-2 key facts in the final reply (no raw dumps)."
-        ),
+        "description": web_desc,
     }
 
     x_tool: dict = {
         "type": "x_search",
-        "description": (
-            "Search X (Twitter) for posts, trends, and social reactions. "
-            "Use when the user cares about X activity or shared x.com links. "
-            "Keep at most 1-2 on-point posts; synthesize briefly in the final reply."
-        ),
+        "description": x_desc,
     }
 
     if has_visual_intent or has_attached_images or _detect_visual_intent(query_text):

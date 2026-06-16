@@ -10,6 +10,7 @@ with only minimal essential light predicates for:
 - decisions around offering light decision tools on addressed turns
 - conservative summary trigger
 - light signals for visual result enrichment on search (no heavy lists)
+- breadth-grounding signal for completeness-oriented search descriptions (#63)
 
 All legacy heavy lists and classify paths cleaned. No large tables here.
 """
@@ -64,6 +65,38 @@ def is_pure_image_generation_request(text: str | None) -> bool:
     if any(n in t for n in negatives):
         return False
     return True
+
+
+def needs_breadth_grounding(text: str | None) -> bool:
+    """Light signal that a query likely benefits from broad, multi-option coverage.
+
+    Query-type based (recommendations, alternatives, comparisons, discovery) — not
+    topic-specific. Used to tune native search descriptions toward exhaustive synthesis
+    without hardcoding per-domain answers (see ticket #63).
+    """
+    if not text or len(text.strip()) < 8:
+        return False
+    t = text.lower()
+    patterns = (
+        "alternativa", "alternative", "opciones", "options", "opción", "option",
+        "mejor forma", "best way", "ways to", "formas de", "cómo puedo", "how can i",
+        "qué usar", "what to use", "qué app", "what app", "which app",
+        "recomend", "recommend", "suger", "suggest", "cuál es mejor", "which is better",
+        "mejor para", "mejor app", "mejor programa", "best for", "best app", "top ", "mejores ", "best ",
+        "compar", "compare", " vs ", " versus ", "pros and cons", "ventajas y desventajas",
+        "lista de", "list of", "enumera", "listame",
+        "apps para", "apps for", "herramientas para", "tools for", "servicios para",
+        "software para", "programas para", "aplicaciones para",
+        "cómo hacer", "how to", "cómo ver", "how to watch", "cómo usar", "how to use",
+        "se puede", "is there a way", "hay alguna forma",
+    )
+    if any(p in t for p in patterns):
+        return True
+    question_shapes = (
+        "qué alternativas", "what alternatives", "cuáles son", "what are the",
+        "hay algún", "is there any", "hay alguna", "is there a",
+    )
+    return any(t.startswith(s) or f" {s}" in t for s in question_shapes)
 
 
 def is_conversation_meta_question(text: str | None) -> bool:
