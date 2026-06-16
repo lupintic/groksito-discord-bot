@@ -85,13 +85,22 @@ def has_explicit_video_intent(text: str | None) -> bool:
     if any(kw in t for kw in video_keywords):
         return True
 
+    # Watching / consumption requests are not video-generation intent.
+    watch_patterns = (
+        "quiero ver", "quiero mirar", "ver un video", "ver videos", "ver el video",
+        "ver este video", "ver ese video", "mira el video", "mira un video",
+        "watch a video", "watch this video", "watch the video", "see a video",
+    )
+    if any(p in t for p in watch_patterns):
+        return False
+
     # Robust fallback for typos / grammar slips ("una video", "generame una video", "genera video de una...")
     # Common when users type fast in Spanish.
     if "video" in t:
-        gen_hints = ("genera", "crea", "haz", "generame", "creame", "hazme", "quiero", "necesito", "make a", "generate a", "create a")
+        gen_hints = ("genera", "crea", "haz", "generame", "creame", "hazme", "quiero un", "necesito un", "make a", "generate a", "create a")
         if any(g in t for g in gen_hints):
-            # Avoid turning analysis or search into video intent
-            bad = ("qué ves", "que ves", "analiza", "describe", "qué es el video", "busca video")
+            # Avoid turning analysis, search, or watch requests into video intent
+            bad = ("qué ves", "que ves", "analiza", "describe", "qué es el video", "busca video", "quiero ver", "ver un video", "ver videos")
             if not any(b in t for b in bad):
                 return True
 
