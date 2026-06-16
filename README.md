@@ -1,5 +1,6 @@
 # Groksito Discord Bot
 
+![CI](https://github.com/lupintic/groksito-discord-bot/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)
 ![Discord](https://img.shields.io/badge/Discord-Bot-7289da.svg)
 ![xAI](https://img.shields.io/badge/xAI-Grok-ff6b6b.svg)

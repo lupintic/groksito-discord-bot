@@ -31,6 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "ruff>=0.8.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -46,4 +47,21 @@ addopts = "-q --tb=short"
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["src", "tests", "web"]
+
+[tool.ruff.lint]
+# Focus on real bugs; defer style-only cleanup (line length, unused imports) to follow-ups.
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E402",  # module-level import not at top (tests, lazy imports)
+    "F401",  # unused imports (risky auto-fix can break re-exports)
+    "F403",  # star re-export in context/__init__.py is intentional
+    "F811",  # duplicate definitions (pre-existing in tools.py, web/main.py)
+    "F841",  # unused variables (pre-existing tech debt)
+    "E741",  # ambiguous names in interactive setup.py prompts
 ]

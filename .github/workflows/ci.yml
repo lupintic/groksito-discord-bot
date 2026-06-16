@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install ruff
+        run: pip install "ruff>=0.8.0"
+
+      - name: Ruff check
+        run: ruff check src tests web setup.py
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest -q --tb=no
+
+  smoke:
+    name: Smoke (imports + --check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Compile all modules (import/syntax guard)
+        run: python -m compileall -q src web
+
+      - name: Validate configuration (--check with dummy secrets)
+        env:
+          DISCORD_BOT_TOKEN: dummy-discord-token-for-ci
+          XAI_API_KEY: sk-dummy-key-for-ci-check
+        run: python -m src.groksito_discord --check
+
+  docker:
+    name: Docker build (bot + web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build bot image
+        run: docker build --target bot -t groksito-bot:ci .
+
+      - name: Build web image
+        run: docker build --target web -t groksito-web:ci .

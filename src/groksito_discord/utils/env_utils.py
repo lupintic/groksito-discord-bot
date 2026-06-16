@@ -114,7 +114,7 @@ def _format_env_value(val: Any) -> str:
     if not val:
         return '""'
     # Bare-safe: letters, digits, and a few path/symbol chars that are common and unambiguous.
-    if re.match(r"^[A-Za-z0-9_./:@%+=-]+$", val) and not val[0] in ("-", "+", "="):
+    if re.match(r"^[A-Za-z0-9_./:@%+=-]+$", val) and val[0] not in ("-", "+", "="):
         return val
     # Needs quoting. Escape backslashes first, then inner double-quotes.
     escaped = val.replace("\\", "\\\\").replace('"', '\\"')

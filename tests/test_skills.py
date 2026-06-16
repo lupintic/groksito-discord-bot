@@ -53,7 +53,8 @@ def temp_registry(monkeypatch, tmp_path):
     reg = SkillRegistry(data_dir=data_dir)
     # Patch the global getter so code using get_skill_registry() sees our temp one.
     # skill_executor imports get_skill_registry at module load, so patch both bindings.
-    getter = lambda: reg
+    def getter():
+        return reg
     monkeypatch.setattr(
         "groksito_discord.skills.skill_registry.get_skill_registry",
         getter,

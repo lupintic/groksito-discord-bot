@@ -359,7 +359,7 @@ def _run_callback_server_once(port: int, timeout: float = 180.0) -> Tuple[Option
             print(f"\n[OAuth] Port {port} is already in use (another listener or previous run?).")
             print("  Solutions:")
             print("    • Use --manual-paste and complete the flow in the browser, then paste the ?code= value.")
-            print(f"    • Pick a different port: set GROK_OAUTH_PORT=56122 (or other) in .env and retry.")
+            print("    • Pick a different port: set GROK_OAUTH_PORT=56122 (or other) in .env and retry.")
             print("    • Kill the process holding the port (netstat / lsof / Task Manager).")
         else:
             print(f"[OAuth] Failed to bind callback server on {XAI_OAUTH_REDIRECT_HOST}:{port}: {e}")

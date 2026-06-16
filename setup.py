@@ -120,7 +120,7 @@ else:
         if val is None or str(val).strip() == "":
             return '""'
         val = str(val)
-        if re.match(r"^[A-Za-z0-9_./:@%+=-]+$", val) and not val[0] in ("-", "+", "="):
+        if re.match(r"^[A-Za-z0-9_./:@%+=-]+$", val) and val[0] not in ("-", "+", "="):
             return val
         escaped = val.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
@@ -711,7 +711,7 @@ def main() -> None:
 
     ok, msg, bak = safe_write_env(ENV_FILE, updates)
     if ok:
-        say(f"\n✅ .env actualizado correctamente (sin duplicados).", "bold green")
+        say("\n✅ .env actualizado correctamente (sin duplicados).", "bold green")
         if bak:
             say(f"   Backup guardado en: {bak}")
     else:
