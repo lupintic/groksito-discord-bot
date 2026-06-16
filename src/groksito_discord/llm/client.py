@@ -186,9 +186,9 @@ async def call_grok_for_groksito(
         try:
             enable_layer = bool(getattr(_settings, "enable_skill_decision_layer", True)) if _settings else True
             if enable_layer and need in ("normal", "rich"):
-                from .skills.decision import make_decision as _make_decision
-                from .skills.skill_executor import prepare_skill_injection as _prepare_injection
-                from .skills.skill_registry import get_skill_registry as _get_reg
+                from ..skills.decision import make_decision as _make_decision
+                from ..skills.skill_executor import prepare_skill_injection as _prepare_injection
+                from ..skills.skill_registry import get_skill_registry as _get_reg
 
                 reg = _get_reg()
                 approved_names = [s.name for s in reg.list_approved()]
@@ -211,7 +211,7 @@ async def call_grok_for_groksito(
                     )
                     if skill_injection:
                         # Mutate the input we are about to send (high-priority skill instructions)
-                        from .skills.skill_executor import inject_skill_into_responses_input as _inject
+                        from ..skills.skill_executor import inject_skill_into_responses_input as _inject
                         initial_input = _inject(initial_input, skill_injection)
                         logger.info(f"{cid_p}[SKILLS] Skill '{skill_injection.skill.name}' injected into prompt")
         except Exception as dec_err:
@@ -261,7 +261,7 @@ async def call_grok_for_groksito(
             tlow = (user_message_text or user_message or "").lower()
 
             # Reuse/extend the cheap creation intent + pattern detector
-            from .skills.skill_proposer import should_offer_create_skill_tool, _has_explicit_edit_intent
+            from ..skills.skill_proposer import should_offer_create_skill_tool, _has_explicit_edit_intent
             creation_candidate = should_offer_create_skill_tool(
                 user_message_text or user_message,
                 channel_id=channel_id,
@@ -358,7 +358,7 @@ async def call_grok_for_groksito(
 
         # === Apply skill restrictions to tool offering (if a skill is active) ===
         try:
-            from .skills.skill_executor import (
+            from ..skills.skill_executor import (
                 filter_native_search_tools as _filter_native,
                 filter_custom_tools as _filter_custom,
             )
@@ -668,7 +668,7 @@ async def call_grok_for_groksito(
                 if name == "use_skill" and "__USE_SKILL_ACTIVATED__:" in result_str:
                     try:
                         skill_id = result_str.split("__USE_SKILL_ACTIVATED__:")[1].split("\n", 1)[0].strip()
-                        from .skills.skill_executor import prepare_skill_injection as _prep_inj
+                        from ..skills.skill_executor import prepare_skill_injection as _prep_inj
                         post_tool_skill_injection = _prep_inj(
                             decision_skill_id=skill_id,
                             user_message=user_message_text,
@@ -759,7 +759,7 @@ async def call_grok_for_groksito(
                 # [SKILL ACTIVE] block in the tool result, this makes the model follow the skill
                 # instructions much more reliably.
                 try:
-                    from .skills.skill_executor import (
+                    from ..skills.skill_executor import (
                         filter_native_search_tools as _filter_native,
                         filter_custom_tools as _filter_custom,
                     )
@@ -878,7 +878,7 @@ async def call_grok_for_groksito(
             )
 
             if can_auto_create and original_message is not None:
-                from .skills.skill_proposer import detect_and_create_skill
+                from ..skills.skill_proposer import detect_and_create_skill
                 creation = await detect_and_create_skill(
                     channel_id=channel_id,
                     user_id=int(user_id) if user_id and user_id.isdigit() else 0,
