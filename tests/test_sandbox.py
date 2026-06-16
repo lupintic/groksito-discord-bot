@@ -24,15 +24,16 @@ from groksito_discord.llm.tools import (
 )
 
 
-def test_sandbox_falls_back_when_docker_missing():
+@pytest.mark.asyncio
+async def test_sandbox_falls_back_when_docker_missing():
     """When docker binary is not present we get a clear simulation message."""
     # Force the "not found" path
     with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError):
-        result = run_code_execution("print(1+1)")
+        result = await run_code_execution("print(1+1)")
         assert "docker not available" in result.lower() or "simulation" in result.lower()
 
     with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError):
-        result = run_playwright_browser(url="https://example.com", action="extract_text")
+        result = await run_playwright_browser(url="https://example.com", action="extract_text")
         assert "docker not available" in result.lower() or "simulation" in result.lower()
 
 
