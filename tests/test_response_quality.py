@@ -46,6 +46,7 @@ class TestSystemPromptCompleteness:
         assert "self-check" in lowered
         assert "web-grok-level completeness" in lowered or "web-grok" in lowered
         assert "multiple focused searches" in lowered
+        assert "balance extra completeness with accuracy" in lowered
         assert "1-2 key facts" not in lowered
 
 
