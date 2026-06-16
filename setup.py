@@ -739,15 +739,56 @@ def main() -> None:
 
     say("\nListo. Puedes volver a correr `python setup.py` cuantas veces quieras. Es idempotente y seguro.")
 
+_SETUPTOOLS_COMMANDS = frozenset({
+    "egg_info",
+    "build",
+    "build_py",
+    "build_ext",
+    "install",
+    "develop",
+    "bdist_wheel",
+    "bdist_egg",
+    "sdist",
+    "clean",
+    "check",
+    "alias",
+    "bdist_rpm",
+    "bdist_wininst",
+    "bdist_msi",
+    "rotate",
+    "register",
+    "upload",
+    "saveopts",
+    "setopt",
+    "bdist_dumb",
+})
+
+
+def _should_run_interactive_cli() -> bool:
+    """Only run the guided .env wizard for explicit, interactive user invocations."""
+    if len(sys.argv) >= 2 and sys.argv[1] in _SETUPTOOLS_COMMANDS:
+        return False
+    if os.environ.get("CI", "").lower() in ("1", "true", "yes"):
+        return False
+    if not sys.stdin.isatty():
+        return False
+    return True
+
+
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        say("\nInterrumpido.", "yellow")
-        sys.exit(130)
-    except Exception as e:
-        say(f"\nError inesperado: {e}", "red")
-        if "--debug" in sys.argv:
-            import traceback
-            traceback.print_exc()
-        sys.exit(1)
+    if _should_run_interactive_cli():
+        try:
+            main()
+        except KeyboardInterrupt:
+            say("\nInterrumpido.", "yellow")
+            sys.exit(130)
+        except Exception as e:
+            say(f"\nError inesperado: {e}", "red")
+            if "--debug" in sys.argv:
+                import traceback
+                traceback.print_exc()
+            sys.exit(1)
+    else:
+        from setuptools import setup
+
+        setup()
