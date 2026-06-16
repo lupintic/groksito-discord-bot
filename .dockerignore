@@ -88,7 +88,8 @@ docker-compose.*.yml
 Thumbs.db
 ehthumbs.db
 
-# Documentation (not required at runtime; keeps image smaller)
+# Documentation and reference material (not required at runtime; keeps image smaller)
+docs/
 *.md
 !README.md               # keep the main one if you really want it (usually still exclude)
 !web/README.md

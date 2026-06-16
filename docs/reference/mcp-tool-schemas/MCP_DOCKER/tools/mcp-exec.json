@@ -1,0 +1,20 @@
+{
+  "name": "mcp-exec",
+  "description": "Execute a tool that exists in the current session. This allows calling tools that may not be visible in listTools results.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "arguments": {
+        "type": "object",
+        "description": "Arguments to use for the tool call."
+      },
+      "name": {
+        "type": "string",
+        "description": "Name of the tool to execute"
+      }
+    },
+    "required": [
+      "name"
+    ]
+  }
+}
