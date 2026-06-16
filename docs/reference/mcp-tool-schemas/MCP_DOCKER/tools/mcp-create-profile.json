@@ -1,0 +1,16 @@
+{
+  "name": "mcp-create-profile",
+  "description": "Create or update a profile with the current gateway state.\nA profile is a snapshot of all currently enabled servers and their configurations.\nIf a profile with the given name already exists, it will be updated with the current state.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Name of the profile to create or update"
+      }
+    },
+    "required": [
+      "name"
+    ]
+  }
+}

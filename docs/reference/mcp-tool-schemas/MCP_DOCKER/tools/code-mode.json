@@ -1,0 +1,24 @@
+{
+  "name": "code-mode",
+  "description": "Create a JavaScript-enabled tool that combines multiple MCP server tools. \nThis allows you to write scripts that call multiple tools and combine their results.\nUse the mcp-find tool to find servers and make sure they are are ready with the mcp-add tool. When running\nmcp-add, we don't have to activate the tools.\n",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Name for the new code-mode tool (will be prefixed with 'code-mode-')"
+      },
+      "servers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of MCP server names whose tools should be available in the JavaScript environment"
+      }
+    },
+    "required": [
+      "servers",
+      "name"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "mcp-config-set",
+  "description": "Set configuration for an MCP server. \nThe config object will be validated against the server's config schema. If validation fails, the error message will include the correct schema.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "config": {
+        "type": "object",
+        "description": "Configuration object for the server. This will be validated against the server's config schema."
+      },
+      "server": {
+        "type": "string",
+        "description": "Name of the MCP server to configure"
+      }
+    },
+    "required": [
+      "server",
+      "config"
+    ]
+  }
+}

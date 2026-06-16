@@ -344,9 +344,12 @@ def _playwright_browser_schema() -> dict:
 def get_skill_specific_custom_schemas(allowed_custom: set[str] | list[str] | None) -> list[dict]:
     """Return full tool schemas for any known skill-declared custom tools.
 
-    This allows skills to 'bring their own' powerful tools (code_execution, playwright_browser, future MCP connectors)
+    This allows skills to 'bring their own' powerful tools (code_execution, playwright_browser, future connectors)
     without them being offered in normal chat. The schemas are only injected into the Responses API call
     when a skill that declares them is active.
+
+    MCP tool schema snapshots in docs/reference/mcp-tool-schemas/ are reference-only and are not loaded here.
+    See docs/mcp-integration.md for the current power-tool architecture and future MCP path.
     """
     if not allowed_custom:
         return []
@@ -355,7 +358,7 @@ def get_skill_specific_custom_schemas(allowed_custom: set[str] | list[str] | Non
     known = {
         "code_execution": _code_execution_schema,
         "playwright_browser": _playwright_browser_schema,
-        # Add future ones here, e.g. "slack", "linear", etc. following MCP pattern.
+        # Add future power tools here (explicit schema + sandbox/handler). See docs/mcp-integration.md.
     }
     for name in allowed:
         if name in known:

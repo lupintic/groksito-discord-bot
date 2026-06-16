@@ -110,6 +110,10 @@ scratch*.py
 # These often contain plans, summaries, and debug output that should never be committed.
 tmp/
 
+# Auto-generated MCP tool schema cache (Grok/Cursor session environment).
+# Canonical reference snapshots live in docs/reference/mcp-tool-schemas/ — see docs/mcp-integration.md.
+mcps/
+
 # -----------------------------------------------------------------------------
 # Testing, coverage, and quality tooling caches
 # -----------------------------------------------------------------------------

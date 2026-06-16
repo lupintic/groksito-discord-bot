@@ -1,0 +1,16 @@
+{
+  "name": "mcp-activate-profile",
+  "description": "Activate a saved profile by loading its servers into the current gateway.\nThis will merge the profile's servers with currently active servers.\nServers that are already active will be skipped.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Profile ID to activate"
+      }
+    },
+    "required": [
+      "name"
+    ]
+  }
+}
