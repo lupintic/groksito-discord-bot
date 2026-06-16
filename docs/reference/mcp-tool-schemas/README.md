@@ -30,3 +30,4 @@ This directory is kept as **design reference** for a possible future MCP connect
 - **Do not** update these files expecting the bot to pick up changes automatically.
 - If schemas become stale, refresh from the source MCP server export or remove the snapshot.
 - These files are excluded from Docker images (see `.dockerignore`).
+- A root-level `mcps/` directory may reappear locally when using Grok/Cursor MCP tooling; it is gitignored. This `docs/reference/mcp-tool-schemas/` path is the committed canonical copy.
