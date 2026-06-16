@@ -691,6 +691,53 @@ async def _handle_generate_audio(args: dict, original_message: Any) -> str:
 # Slash Command Support (reuses 100% of core TTS + delivery logic)
 # =============================================================================
 
+XAI_TTS_DOCS_URL = "https://docs.x.ai/developers/model-capabilities/audio/text-to-speech"
+
+# xAI wrapping speech tags exposed as the optional /audio `estilo` slash parameter.
+AUDIO_WRAPPING_TAGS: tuple[tuple[str, str], ...] = (
+    ("Susurro (whisper)", "whisper"),
+    ("Suave (soft)", "soft"),
+    ("Alto (loud)", "loud"),
+    ("Más intensidad", "build-intensity"),
+    ("Menos intensidad", "decrease-intensity"),
+    ("Tono alto", "higher-pitch"),
+    ("Tono bajo", "lower-pitch"),
+    ("Lento (slow)", "slow"),
+    ("Rápido (fast)", "fast"),
+    ("Cantar (singing)", "singing"),
+    ("Entonado (sing-song)", "sing-song"),
+    ("Risa al hablar", "laugh-speak"),
+    ("Énfasis", "emphasis"),
+)
+
+
+def apply_wrapping_speech_tag(text: str, tag: str | None) -> str:
+    """Wrap prepared text with an xAI wrapping speech tag when `estilo` is selected."""
+    if not tag or not text.strip():
+        return text
+    clean_tag = tag.strip().strip("<>/")
+    if not clean_tag:
+        return text
+    return f"<{clean_tag}>{text}</{clean_tag}>"
+
+
+def build_audio_speech_tags_embed() -> discord.Embed:
+    """Brief /audio usage help when invoked without text or a replied message."""
+    embed = discord.Embed(
+        title="🔊 /audio — Text-to-Speech",
+        url=XAI_TTS_DOCS_URL,
+        description=(
+            "Escribe el **texto** a leer o **responde a un mensaje** y ejecuta `/audio`.\n\n"
+            "• **Inline tags** van dentro del texto (ver descripción del parámetro `texto`).\n"
+            "• **Estilo envolvente** se elige en el parámetro `estilo` (whisper, soft, slow, etc.).\n"
+            "• **Voz** opcional: eve, ara, rex, sal, leo."
+        ),
+        color=0x5865F2,
+    )
+    embed.set_footer(text="Documentación xAI TTS · Speech Tags")
+    return embed
+
+
 async def prepare_text_from_interaction(
     interaction: discord.Interaction, provided_text: str = ""
 ) -> str:
