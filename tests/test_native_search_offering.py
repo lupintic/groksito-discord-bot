@@ -26,6 +26,17 @@ def test_image_gen_turn_offers_no_search():
     assert tools == []
 
 
+def test_breadth_query_enhances_web_search_description():
+    tools = _build_native_search_tools(
+        query_text="mejor app para castear películas",
+        context_need="normal",
+        has_visual_intent=False,
+        has_attached_images=False,
+    )
+    web = next(t for t in tools if t["type"] == "web_search")
+    assert "multiple focused searches" in web["description"]
+
+
 def test_visual_query_enables_image_flags():
     tools = _build_native_search_tools(
         query_text="muéstrame fotos del evento",
