@@ -126,12 +126,10 @@ def _build_native_search_tools(
     has_visual_intent: bool,
     has_attached_images: bool,
 ) -> list[dict]:
-    """
-    Build native xAI web_search + x_search tool schemas.
+    """Build native xAI web_search + x_search tool schemas for addressed turns.
 
-    Prompt-driven philosophy (#48): on normal/rich addressed turns, offer both native
-    search tools and let Grok decide when to call them. Skip only on ultra-light paths
-    (casual/minimal/image_gen) where search is unlikely to help.
+    Skips ultra-light paths (casual/minimal/image_gen and pure image gen without
+    attachments). Otherwise offers both tools; Grok decides when to call them.
     """
     if context_need in ("casual", "minimal", "image_gen"):
         return []
@@ -142,7 +140,8 @@ def _build_native_search_tools(
     except Exception:
         pass
 
-    # Concise schemas (prompt-driven #48); descriptions from prompt_builder (single source).
+    # Descriptions come exclusively from prompt_builder.get_native_search_descriptions
+    # (single source of truth with SYSTEM_PROMPT completeness guidance).
     web_desc, x_desc = get_native_search_descriptions(query_text)
 
     web_tool: dict = {

@@ -67,6 +67,505 @@ except Exception:
 
 logger = logging.getLogger("groksito.llm")
 
+# =============================================================================
+# previous_response_id Multi-Turn Contract
+# =============================================================================
+# - Custom tools are minimized on continuations (get_continuation_tools) because
+#   the model retains prior tool declarations via previous_response_id.
+# - Native search re-inclusion is conservative: default [] on continuations;
+#   re-offered only when _should_reoffer_native_search_on_continuation detects
+#   prior-round search activity and no respond_directly/delivery short-circuit.
+# - Vision images are sent only on the first turn of a logical user message;
+#   continuations carry text/tool results only (previous_response_id chains state).
+# - DIRECT_DELIVERY short-circuit must happen before sending tool outputs back
+#   (guarantees no duplicate Discord replies via DIRECT_DELIVERY_PERFORMED).
+
+MEDIA_ACTION_TOOLS = frozenset({
+    "generate_image",
+    "edit_image",
+    "generate_video",
+    "generate_audio",
+    "reply_to_user",
+})
+
+_CONTINUATION_NO_SEARCH_REOFFER_TOOLS = frozenset({
+    "respond_directly",
+    *MEDIA_ACTION_TOOLS,
+})
+
+_DIRECT_DELIVERY_SUCCESS_PHRASES = (
+    "success: image(s) generated and delivered directly",
+    "success: edited image(s) delivered directly",
+    "success: audio generated and delivered directly",
+    "success: video successfully generated and delivered directly",
+    "delivered directly to the user",
+    "clean direct message delivered to the user",
+    "policy blocked; clean direct message delivered",
+    "message sent directly to the user",
+)
+
+
+def _is_direct_delivery_success(result_str: str, tool_name: str, cid_p: str) -> bool:
+    """Detect explicit direct-delivery success from media/reply_to_user tool results."""
+    lowered = result_str.lower()
+    if any(phrase in lowered for phrase in _DIRECT_DELIVERY_SUCCESS_PHRASES):
+        logger.info(
+            f"{cid_p}[LLM] Direct delivery SUCCESS for tool '{tool_name}' "
+            "— suppressing final text reply"
+        )
+        return True
+    if "policy blocked" in lowered and "clean direct message delivered" in lowered:
+        return True
+    return False
+
+
+def _finalize_response(response: Any, direct_delivery_performed: bool, cid_p: str) -> str | object:
+    """Extract final text or return DIRECT_DELIVERY_PERFORMED sentinel."""
+    final_text = _extract_final_text(response)
+
+    if direct_delivery_performed:
+        logger.info(
+            f"{cid_p}[LLM] Direct media/action delivery performed "
+            "— returning DIRECT_DELIVERY_PERFORMED sentinel (no second reply)"
+        )
+        return DIRECT_DELIVERY_PERFORMED
+
+    if final_text:
+        return final_text.strip()
+
+    return "✅ Groksito procesó tu mensaje usando las herramientas (respuesta vía Responses API)."
+
+
+def _should_offer_light_decision(
+    user_message_text: str,
+    user_message: str,
+    *,
+    is_mentioned: bool,
+    is_reply_to_bot: bool,
+    context_need: str,
+) -> bool:
+    """Wrap should_offer_light_decision_tools with safe defaulting."""
+    try:
+        return should_offer_light_decision_tools(
+            user_message_text or user_message,
+            is_mentioned=is_mentioned,
+            is_reply_to_bot=is_reply_to_bot,
+            context_need=context_need,
+        )
+    except Exception:
+        return False
+
+
+def _should_reoffer_native_search_on_continuation(
+    prev_response: Any,
+    *,
+    native_search_tools: list[dict],
+    executed_tool_names: set[str],
+) -> bool:
+    """Conservative native-search re-offer on continuation rounds.
+
+    Default is no re-offer (rely on previous_response_id). Re-include schemas only
+    when the prior response shows search activity. Short-circuit when the model
+    just invoked respond_directly or a delivery tool in the current round.
+    """
+    if not native_search_tools:
+        return False
+
+    if executed_tool_names & _CONTINUATION_NO_SEARCH_REOFFER_TOOLS:
+        return False
+
+    try:
+        prev_output = getattr(prev_response, "output", None) or []
+        for item in prev_output:
+            itype = getattr(item, "type", None)
+            if isinstance(item, dict):
+                itype = item.get("type")
+            itype_str = str(itype or "").lower()
+
+            if itype_str == "function_call":
+                name = getattr(item, "name", None)
+                if name is None and isinstance(item, dict):
+                    name = item.get("name")
+                if name in ("web_search", "x_search"):
+                    return True
+
+            if itype_str and (
+                "web_search" in itype_str
+                or "x_search" in itype_str
+                or "search_call" in itype_str
+            ):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+async def _prepare_first_turn_data(
+    *,
+    user_message: str,
+    channel_id: int,
+    original_message: Any,
+    image_urls: list[str] | None,
+    referenced_context: dict | None,
+    reply_chain_contexts: list[dict] | None,
+    is_reply_continuation: bool,
+    has_x_link_intent: bool,
+    is_reply_to_bot: bool,
+    is_mentioned: bool,
+) -> dict[str, Any]:
+    """Phase 1 prep: pure-intent detection + authoritative build_responses_input."""
+    pure_video_gen_intent = False
+    pure_image_gen_intent = False
+    try:
+        if (
+            is_pure_video_generation_request(user_message)
+            and not bool(image_urls)
+            and not is_reply_continuation
+        ):
+            pure_video_gen_intent = True
+        elif (
+            is_pure_image_generation_request(user_message)
+            and not bool(image_urls)
+            and not is_reply_continuation
+        ):
+            pure_image_gen_intent = True
+    except Exception:
+        pure_video_gen_intent = False
+        pure_image_gen_intent = False
+
+    input_data = await build_responses_input(
+        user_message=user_message,
+        channel_id=channel_id,
+        original_message=original_message,
+        image_urls=image_urls,
+        referenced_context=referenced_context,
+        reply_chain_contexts=reply_chain_contexts,
+        is_reply_continuation=is_reply_continuation,
+        has_x_link_intent=has_x_link_intent,
+        image_gen_intent=pure_image_gen_intent or pure_video_gen_intent,
+        is_reply_to_bot=is_reply_to_bot,
+        is_mentioned=is_mentioned,
+    )
+
+    return {
+        "input_data": input_data,
+        "pure_video_gen_intent": pure_video_gen_intent,
+        "pure_image_gen_intent": pure_image_gen_intent,
+    }
+
+
+def _select_tools_for_first_turn(
+    *,
+    user_message_text: str,
+    user_message: str,
+    need: str,
+    image_urls: list[str] | None,
+    has_visual_intent: bool,
+    is_mentioned: bool,
+    is_reply_to_bot: bool,
+    is_addressed: bool,
+    pure_image_gen_intent: bool,
+    pure_video_gen_intent: bool,
+) -> dict[str, Any]:
+    """Phase 2: intent signals + custom/native tool schema selection for first turn."""
+    creation_visual_intent = (
+        has_visual_intent
+        or _detect_image_creation_intent(
+            user_message_text,
+            has_reference_image=bool(image_urls),
+        )
+        or (bool(image_urls) and is_image_edit_request(user_message_text, has_reference_image=True))
+    )
+    vision_or_visual_query = (
+        bool(image_urls) or _detect_visual_intent(user_message_text) or creation_visual_intent
+    )
+    effective_visual_intent = creation_visual_intent
+    explicit_video_intent = has_explicit_video_intent(user_message_text)
+    explicit_audio_intent = has_explicit_audio_intent(user_message_text)
+
+    offer_light_decision_tools = _should_offer_light_decision(
+        user_message_text,
+        user_message,
+        is_mentioned=is_mentioned,
+        is_reply_to_bot=is_reply_to_bot,
+        context_need=need,
+    )
+
+    custom_tools = get_tools_for_request(
+        query_need=need,
+        has_visual_intent=effective_visual_intent,
+        has_explicit_video_intent=explicit_video_intent,
+        has_explicit_audio_intent=explicit_audio_intent,
+        is_tool_continuation=False,
+        pure_image_gen=pure_image_gen_intent,
+        pure_video_gen=pure_video_gen_intent,
+        offer_light_decision_tools=offer_light_decision_tools,
+    )
+
+    if need in ("casual", "image_gen") or (need == "minimal" and not is_addressed):
+        native_search_tools: list[dict] = []
+    else:
+        native_search_tools = _build_native_search_tools(
+            query_text=user_message_text,
+            context_need=need,
+            has_visual_intent=vision_or_visual_query,
+            has_attached_images=bool(image_urls),
+        )
+
+    return {
+        "custom_tools": custom_tools,
+        "native_search_tools": native_search_tools,
+        "effective_visual_intent": effective_visual_intent,
+        "explicit_video_intent": explicit_video_intent,
+        "explicit_audio_intent": explicit_audio_intent,
+        "offer_light_decision_tools": offer_light_decision_tools,
+    }
+
+
+async def _execute_tool_loop(
+    *,
+    client: AsyncOpenAI,
+    model: str,
+    response: Any,
+    need: str,
+    user_id: str,
+    stable_prefix_len: int,
+    effective_visual_intent: bool,
+    explicit_video_intent: bool,
+    explicit_audio_intent: bool,
+    pure_image_gen_intent: bool,
+    pure_video_gen_intent: bool,
+    native_search_tools: list[dict],
+    offered_custom_tool_names: set[str],
+    original_message: Any,
+    image_urls: list[str] | None,
+    is_addressed: bool,
+    cid_p: str,
+    max_tool_rounds: int = 3,
+) -> tuple[Any, bool, bool, bool]:
+    """Phase 3: multi-round tool execution + continuation via previous_response_id.
+
+    Returns (final_response, direct_delivery_performed, model_chose_search, model_chose_direct).
+    """
+    direct_delivery_performed = False
+    model_chose_search = False
+    model_chose_direct = False
+
+    for round_num in range(1, max_tool_rounds + 1):
+        client_tool_outputs: list[dict] = []
+        round_executed_tools: set[str] = set()
+
+        output_items = getattr(response, "output", None) or []
+        for item in output_items:
+            if getattr(item, "type", None) != "function_call":
+                continue
+
+            name = getattr(item, "name", None)
+            if name is None and isinstance(item, dict):
+                name = item.get("name")
+
+            if name in ("web_search", "x_search"):
+                model_chose_search = True
+            if name == "respond_directly":
+                model_chose_direct = True
+
+            raw_args = getattr(item, "arguments", None)
+            if raw_args is None and isinstance(item, dict):
+                raw_args = item.get("arguments", {})
+            if isinstance(raw_args, str):
+                try:
+                    raw_args = json.loads(raw_args)
+                except Exception:
+                    raw_args = {}
+
+            call_id = getattr(item, "call_id", None) or getattr(item, "id", None)
+            if call_id is None and isinstance(item, dict):
+                call_id = item.get("call_id") or item.get("id")
+
+            try:
+                from ..config import settings as _s
+                if getattr(_s, "log_tool_selection", True):
+                    from .tools import tools_logger as _tl
+                    decision_tool_names = {
+                        "web_search",
+                        "x_search",
+                        "get_recent_context",
+                        "respond_directly",
+                    }
+                    if name in decision_tool_names:
+                        _arg_keys = (
+                            list((raw_args or {}).keys())
+                            if isinstance(raw_args, dict)
+                            else []
+                        )
+                        _tl.info(
+                            f"{cid_p}[GROK_CHOICE] tool={name} | round={round_num} | "
+                            f"keys={_arg_keys} | addressed={is_addressed}"
+                        )
+            except Exception:
+                pass
+
+            logger.info(
+                f"{cid_p}[LLM] Round {round_num}: executing custom tool '{name}' "
+                f"(args keys: {list((raw_args or {}).keys()) if isinstance(raw_args, dict) else 'n/a'})"
+            )
+
+            available = name in offered_custom_tool_names
+            tool_type = "custom" if name in offered_custom_tool_names else "native-or-unknown"
+            try:
+                from .tools import tools_logger
+                tools_logger.debug(
+                    f"{cid_p}[TOOLS] execution | tool={name} | available={str(available).lower()} "
+                    f"| type={tool_type} | round={round_num}"
+                )
+            except Exception:
+                pass
+
+            try:
+                result = await execute_hybrid_tool(
+                    name=name or "unknown_tool",
+                    args=raw_args if isinstance(raw_args, dict) else {},
+                    original_message=original_message,
+                    image_urls=image_urls,
+                )
+            except Exception as tool_exec_err:
+                arg_keys = (
+                    list((raw_args or {}).keys())
+                    if isinstance(raw_args, dict)
+                    else None
+                )
+                result = format_tool_execution_error(
+                    name or "unknown_tool",
+                    tool_exec_err,
+                    round_num=round_num,
+                    arg_keys=arg_keys,
+                )
+                logger.error(f"{cid_p}[TOOLS] {result}", exc_info=True)
+
+            if name:
+                round_executed_tools.add(name)
+
+            result_str = str(result)
+            logger.info(
+                f"{cid_p}[LLM] Round {round_num}: tool '{name}' completed, "
+                f"result length={len(result_str)}"
+            )
+
+            if name in MEDIA_ACTION_TOOLS:
+                if _is_direct_delivery_success(result_str, name or "", cid_p):
+                    direct_delivery_performed = True
+
+            client_tool_outputs.append({
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": result_str[:4000],
+            })
+
+        if not client_tool_outputs:
+            logger.info(
+                f"{cid_p}[LLM] Round {round_num}: no more client-side tool calls "
+                "— conversation complete."
+            )
+            break
+
+        if direct_delivery_performed:
+            logger.info(
+                f"{cid_p}[LLM] Round {round_num}: direct delivery performed "
+                "— short-circuiting (skip sending tool results back + no further rounds). "
+                "Natural + cheap."
+            )
+            break
+
+        logger.info(
+            f"{cid_p}[LLM] Round {round_num}: sending back {len(client_tool_outputs)} "
+            "tool result(s) using previous_response_id"
+        )
+
+        try:
+            prev_id = getattr(response, "id", None)
+            cache_key = _get_prompt_cache_key(original_message)
+
+            continuation_tools = get_tools_for_request(
+                query_need=need,
+                has_visual_intent=effective_visual_intent,
+                has_explicit_video_intent=explicit_video_intent,
+                has_explicit_audio_intent=explicit_audio_intent,
+                is_tool_continuation=True,
+                pure_image_gen=pure_image_gen_intent,
+                pure_video_gen=pure_video_gen_intent,
+            )
+
+            continuation_native_search_tools = (
+                native_search_tools
+                if _should_reoffer_native_search_on_continuation(
+                    response,
+                    native_search_tools=native_search_tools,
+                    executed_tool_names=round_executed_tools,
+                )
+                else []
+            )
+
+            offered_custom_tool_names = {t.get("name") for t in continuation_tools if t.get("name")}
+            try:
+                img_search = False
+                img_understand = False
+                for t in continuation_native_search_tools:
+                    if t.get("type") == "web_search":
+                        img_search = t.get("enable_image_search", False)
+                        img_understand = t.get("enable_image_understanding", False)
+                        break
+
+                log_tool_selection(
+                    turn_type="continuation",
+                    query_need=need,
+                    has_visual_intent=effective_visual_intent,
+                    custom_tools=continuation_tools,
+                    native_search_tools=continuation_native_search_tools,
+                    enable_image_search=img_search,
+                    enable_image_understanding=img_understand,
+                )
+            except Exception as log_err:
+                logger.debug(f"{cid_p}[TOOLS] selection logging failed (continuation): {log_err}")
+
+            response = await _call_responses_with_retry(
+                client,
+                model=model,
+                input=client_tool_outputs,
+                previous_response_id=prev_id,
+                tools=[
+                    *continuation_native_search_tools,
+                    *continuation_tools,
+                ],
+                extra_body={"prompt_cache_key": cache_key},
+            )
+        except Exception as continue_err:
+            logger.warning(
+                f"{cid_p}[LLM] Continuation with previous_response_id failed: {continue_err} "
+                "— stopping tool loop"
+            )
+            break
+
+        continuation_cache_context = {
+            "turn_type": "continuation",
+            "query_need": need,
+            "has_visual_intent": effective_visual_intent,
+            "custom_tools_count": len(continuation_tools),
+            "custom_tools_set": _infer_tools_set_name(need, effective_visual_intent, True),
+            "user_id": user_id,
+            "prefix_stability_indicator": f"sys~{stable_prefix_len}",
+        }
+
+        _extract_and_log_token_usage(
+            response,
+            model=model,
+            has_images=bool(image_urls),
+            category="Tool",
+            is_tool_continuation=True,
+            cache_context=continuation_cache_context,
+        )
+
+    return response, direct_delivery_performed, model_chose_search, model_chose_direct
+
 
 async def call_grok_for_groksito(
     user_message: str,
@@ -133,31 +632,8 @@ async def call_grok_for_groksito(
         if getattr(settings, "summarization_enabled", False):
             await _maybe_proactive_summarize(channel_id, original_message, client)
 
-        # Pure media-gen intents for the ultra-minimal image_gen context+tools path (mirrors Grok web).
-        pure_video_gen_intent = False
-        pure_image_gen_intent = False
-        try:
-            if (
-                is_pure_video_generation_request(user_message)
-                and not bool(image_urls)
-                and not is_reply_continuation
-            ):
-                pure_video_gen_intent = True
-            elif (
-                is_pure_image_generation_request(user_message)
-                and not bool(image_urls)
-                and not is_reply_continuation
-            ):
-                pure_image_gen_intent = True
-        except Exception:
-            pure_video_gen_intent = False
-            pure_image_gen_intent = False
-
-        # === SINGLE CALL to the authoritative input builder (llm_input.py) ===
-        # This is the single source of truth for initial_input.
-        # Context injection: high-prio [R:] + deeper reply_chain_contexts (text ancestors for links/referents) on addressed turns.
-        # No recent summary pre-injection (recent context is on-demand via tool only; see #19).
-        input_data = await build_responses_input(
+        # === Phase 1: Credential prep (above) + input construction ===
+        prep = await _prepare_first_turn_data(
             user_message=user_message,
             channel_id=channel_id,
             original_message=original_message,
@@ -166,113 +642,41 @@ async def call_grok_for_groksito(
             reply_chain_contexts=reply_chain_contexts,
             is_reply_continuation=is_reply_continuation,
             has_x_link_intent=has_x_link_intent,
-            image_gen_intent=pure_image_gen_intent or pure_video_gen_intent,
             is_reply_to_bot=is_reply_to_bot,
             is_mentioned=is_mentioned,
         )
+        input_data = prep["input_data"]
+        pure_video_gen_intent = prep["pure_video_gen_intent"]
+        pure_image_gen_intent = prep["pure_image_gen_intent"]
 
-        # Unpack what we need for the rest of the flow
         initial_input = input_data["initial_input"]
         stable_prefix_len = input_data["stable_prefix_len"]
         need = input_data["need"]
         user_id = input_data["user_id"]
         user_message_text = input_data["user_message_text"]
-
         is_addressed = bool(is_mentioned or is_reply_to_bot)
 
-        # === Smart Tool Selection + Native Tools ===
-        # has_visual_intent from upstream is now STRICT image *creation/edit* intent (not just "image present").
-        # We keep a separate broader signal only for enabling image_understanding / image_search flags on native web_search.
-        creation_visual_intent = (
-            has_visual_intent
-            or _detect_image_creation_intent(
-                user_message_text,
-                has_reference_image=bool(image_urls),
-            )
-            or (bool(image_urls) and is_image_edit_request(user_message_text, has_reference_image=True))
-        )
-
-        # Broader signal: presence of images (for vision) OR query mentions visuals -> controls img_* flags on search tools.
-        # This allows useful vision+search in mixed cases (image in reply + current events question) without
-        # polluting with gen/edit tool schemas.
-        vision_or_visual_query = bool(image_urls) or _detect_visual_intent(user_message_text) or creation_visual_intent
-
-        # For custom tool schemas and "visual flow" continuations we use the strict creation signal.
-        effective_visual_intent = creation_visual_intent
-
-        # Explicit video intent ΓÇö used as Python-level guard for offering/allowing generate_video
-        # (complements the strict description in the tool schema and the guard inside the handler)
-        explicit_video_intent = has_explicit_video_intent(user_message_text)
-        explicit_audio_intent = has_explicit_audio_intent(user_message_text)
-
-        # pure_image_gen_intent was already computed before build_responses_input (see above)
-        # so we can pass a clean "image_gen" mode to both the context builder and the tool selector.
-
         if has_x_link_intent:
-            logger.info(f"{cid_p}[LLM] X/Link intent detected in reply ΓÇö boosting context awareness for referenced links")
+            logger.info(f"{cid_p}[LLM] X/Link intent detected in reply — boosting context awareness for referenced links")
 
-        offer_light_decision_tools = False
-        try:
-            if should_offer_light_decision_tools(
-                user_message_text or user_message,
-                is_mentioned=is_mentioned,
-                is_reply_to_bot=is_reply_to_bot,
-                context_need=need,
-            ):
-                offer_light_decision_tools = True
-        except Exception:
-            offer_light_decision_tools = False
-
-        custom_tools = get_tools_for_request(
-            query_need=need,
-            has_visual_intent=effective_visual_intent,
-            has_explicit_video_intent=explicit_video_intent,
-            has_explicit_audio_intent=explicit_audio_intent,
-            is_tool_continuation=False,
-            pure_image_gen=pure_image_gen_intent,
-            pure_video_gen=pure_video_gen_intent,
-            offer_light_decision_tools=offer_light_decision_tools,
+        # === Phase 2: First-turn tool selection + native search offering ===
+        tool_selection = _select_tools_for_first_turn(
+            user_message_text=user_message_text,
+            user_message=user_message,
+            need=need,
+            image_urls=image_urls,
+            has_visual_intent=has_visual_intent,
+            is_mentioned=is_mentioned,
+            is_reply_to_bot=is_reply_to_bot,
+            is_addressed=is_addressed,
+            pure_image_gen_intent=pure_image_gen_intent,
+            pure_video_gen_intent=pure_video_gen_intent,
         )
-
-        # === Native search tool offering (first-turn) ===
-        # For first-turn messages where need in ("normal", "rich"), we *consider* native search tools.
-        # (casual/minimal/image_gen get none ΓÇö major token saver).
-        #
-        # web_search is offered for most normal/rich (fresh-info potential).
-        # x_search is offered only on *clear* X/Twitter signals (stricter filter in _build_native_search_tools)
-        # to lower average offers of the x_search schema and reduce invocations of its result payloads.
-        #
-        # Native search offering decision (which schemas to declare) uses lightweight signals + need only.
-        # There is ZERO heuristic that decides whether the *model should call* search ΓÇö that is 100% Grok
-        # (via SYSTEM_PROMPT + the efficiency-focused tool descriptions). The model can still use web_search
-        # for social info if x_search schema was not sent.
-        # - We only skip for the explicitly lazy cases (casual/minimal/image_gen).
-        # - On continuation turns we further minimize (no re-send of native search by default).
-        # - Combined with minimal injection (only [R:] on bot replies) = maximum nativeness + low tokens.
-        #
-        # On continuation turns (see below), we do NOT re-send native_search_tools by default.
-        # We rely on previous_response_id for the model to retain knowledge of previously offered
-        # tools (similar to how custom continuation tools are minimized). This saves significant
-        # tokens on multi-round flows (the search tool descriptions are non-trivial).
-        if need in ("casual", "image_gen") or (need == "minimal" and not is_addressed):
-            # Explicit laziness in the main llm flow (builder will also return []).
-            # Addressed minimal turns may still get light decision tools.
-            # still get native search schemas so Grok + respond_directly can decide; keeps classify for extremes.
-            native_search_tools = []
-        else:
-            # Prompt-driven (#48): offer native search on normal/rich turns; Grok decides usage.
-            native_search_tools = _build_native_search_tools(
-                query_text=user_message_text,
-                context_need=need,
-                has_visual_intent=vision_or_visual_query,
-                has_attached_images=bool(image_urls),
-            )
-
-
-
-        # (Recent context force logic removed in #19: summaries are generated exclusively on-demand
-        # inside the get_recent_context tool handler when the model explicitly calls it. No
-        # pre-injection or decision-forced injection occurs before or during the first turn.)
+        custom_tools = tool_selection["custom_tools"]
+        native_search_tools = tool_selection["native_search_tools"]
+        effective_visual_intent = tool_selection["effective_visual_intent"]
+        explicit_video_intent = tool_selection["explicit_video_intent"]
+        explicit_audio_intent = tool_selection["explicit_audio_intent"]
 
         # Structured tool selection logging
         offered_custom_tool_names = {t.get("name") for t in custom_tools if t.get("name")}
@@ -324,7 +728,7 @@ async def call_grok_for_groksito(
                     f"Retrying first turn WITHOUT images so the response can still succeed using text + tools (e.g. x_search for X links)."
                 )
                 try:
-                    # Rebuild a text-only input (the llm_input builder + its internal filter will produce plain text content).
+                    # Rebuild via the single authoritative build_responses_input (text-only path).
                     plain_input_data = await build_responses_input(
                         user_message=user_message,
                         channel_id=channel_id,
@@ -411,289 +815,28 @@ async def call_grok_for_groksito(
             cache_context=first_turn_cache_context,
         )
 
-        # === Multi-round tool calling loop (core orchestration responsibility) ===
-        max_tool_rounds = 3
-        direct_delivery_performed = False
-        MEDIA_ACTION_TOOLS = {"generate_image", "edit_image", "generate_video", "generate_audio", "reply_to_user"}
-
-        def _is_direct_delivery_success(result_str: str, tool_name: str) -> bool:
-            """Extract direct delivery detection from tool results.
-
-            Preserves the exact rule that only explicit "delivered directly" success
-            phrases from media/reply_to_user tools cause us to set the flag and
-            short-circuit / return the DIRECT_DELIVERY_PERFORMED sentinel.
-            This invariant is what guarantees no duplicate replies.
-            """
-            lowered = result_str.lower()
-            direct_delivery_success_phrases = [
-                "success: image(s) generated and delivered directly",
-                "success: edited image(s) delivered directly",
-                "success: audio generated and delivered directly",
-                "success: video successfully generated and delivered directly",
-                "delivered directly to the user",
-                "clean direct message delivered to the user",
-                "policy blocked; clean direct message delivered",
-                "message sent directly to the user"
-            ]
-            if any(phrase in lowered for phrase in direct_delivery_success_phrases):
-                logger.info(f"{cid_p}[LLM] Direct delivery SUCCESS for tool '{tool_name}' ΓÇö suppressing final text reply")
-                return True
-
-            if "policy blocked" in lowered and "clean direct message delivered" in lowered:
-                return True
-            return False
-
-        def _finalize_response(response: Any, direct_delivery_performed: bool, cid_p: str) -> str | object:
-            """Mechanical extraction of the final response handling.
-
-            Preserves two key invariants:
-            1. If any media or reply_to_user tool performed a direct Discord reply,
-               we must return the DIRECT_DELIVERY_PERFORMED sentinel (identity-checked
-               in conversation.py) so that no secondary text reply is ever sent.
-            2. Otherwise we return the extracted final text (or a generic success message).
-            """
-            final_text = _extract_final_text(response)
-
-            if direct_delivery_performed:
-                logger.info(f"{cid_p}[LLM] Direct media/action delivery performed ΓÇö returning DIRECT_DELIVERY_PERFORMED sentinel (no second reply)")
-                return DIRECT_DELIVERY_PERFORMED
-
-            if final_text:
-                return final_text.strip()
-
-            return "Γ£à Groksito proces├│ tu mensaje usando las herramientas (respuesta v├¡a Responses API)."
-
-        # Choice flags for addressed metrics (set when we see the model invoke these during tool loop)
-        model_chose_search = False
-        model_chose_direct = False
-
-        for round_num in range(1, max_tool_rounds + 1):
-            client_tool_outputs = []
-
-            output_items = getattr(response, "output", None) or []
-            for item in output_items:
-                if getattr(item, "type", None) != "function_call":
-                    continue
-
-                name = getattr(item, "name", None)
-                if name is None and isinstance(item, dict):
-                    name = item.get("name")
-
-                # Track model choice for addressed-turn instrumentation (native search vs respond_direct)
-                if name in ("web_search", "x_search"):
-                    model_chose_search = True
-                if name == "respond_directly":
-                    model_chose_direct = True
-
-                raw_args = getattr(item, "arguments", None)
-                if raw_args is None and isinstance(item, dict):
-                    raw_args = item.get("arguments", {})
-                if isinstance(raw_args, str):
-                    try:
-                        raw_args = json.loads(raw_args)
-                    except Exception:
-                        raw_args = {}
-
-                call_id = getattr(item, "call_id", None) or getattr(item, "id", None)
-                if call_id is None and isinstance(item, dict):
-                    call_id = item.get("call_id") or item.get("id")
-
-                # Debug logging for tool selection decisions by the model.
-                # Lightweight + gated by the existing log_tool_selection flag (easy to enable/disable;
-                # default True). Focuses on main decision points the model reaches via native tool calling
-                # (when search chosen, when recent context requested via get_recent_context, respond_directly
-                # vs tools, etc.). Particularly useful on normal @mentions where the
-                # light decision tool pair (respond_directly + get_recent_context) is offered to let the
-                # model decide. Non-intrusive, best-effort, no sensitive values logged, trivial to remove.
-                # Uses tools_logger to match other structured tool/decision logs (log_tool_selection etc).
-                try:
-                    from ..config import settings as _s
-                    if getattr(_s, "log_tool_selection", True):
-                        from .tools import tools_logger as _tl
-                        DECISION_TOOL_NAMES = {
-                            "web_search",
-                            "x_search",
-                            "get_recent_context",
-                            "respond_directly",
-                        }
-                        if name in DECISION_TOOL_NAMES:
-                            _arg_keys = (
-                                list((raw_args or {}).keys())
-                                if isinstance(raw_args, dict)
-                                else []
-                            )
-                            _tl.info(
-                                f"{cid_p}[GROK_CHOICE] tool={name} | round={round_num} | keys={_arg_keys} | addressed={is_addressed}"
-                            )
-                except Exception:
-                    pass
-
-                logger.info(f"{cid_p}[LLM] Round {round_num}: executing custom tool '{name}' (args keys: {list((raw_args or {}).keys()) if isinstance(raw_args, dict) else 'n/a'})")
-
-                available = (name in offered_custom_tool_names) if 'offered_custom_tool_names' in locals() else "unknown"
-                tool_type = "custom" if name in (offered_custom_tool_names or set()) else "native-or-unknown"
-                try:
-                    from .tools import tools_logger
-                    tools_logger.debug(
-                        f"{cid_p}[TOOLS] execution | tool={name} | available={str(available).lower()} | type={tool_type} | round={round_num}"
-                    )
-                except Exception:
-                    pass
-
-                try:
-                    result = await execute_hybrid_tool(
-                        name=name or "unknown_tool",
-                        args=raw_args if isinstance(raw_args, dict) else {},
-                        original_message=original_message,
-                        image_urls=image_urls,
-                    )
-                except Exception as tool_exec_err:
-                    arg_keys = (
-                        list((raw_args or {}).keys())
-                        if isinstance(raw_args, dict)
-                        else None
-                    )
-                    result = format_tool_execution_error(
-                        name or "unknown_tool",
-                        tool_exec_err,
-                        round_num=round_num,
-                        arg_keys=arg_keys,
-                    )
-                    logger.error(f"{cid_p}[TOOLS] {result}", exc_info=True)
-
-                result_str = str(result)
-                logger.info(f"{cid_p}[LLM] Round {round_num}: tool '{name}' completed, result length={len(result_str)}")
-
-                if name in MEDIA_ACTION_TOOLS:
-                    if _is_direct_delivery_success(result_str, name):
-                        direct_delivery_performed = True
-
-                client_tool_outputs.append({
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": result_str[:4000],
-                })
-
-            if not client_tool_outputs:
-                logger.info(f"{cid_p}[LLM] Round {round_num}: no more client-side tool calls ΓÇö conversation complete.")
-                break
-
-            # Short-circuit optimization for direct media delivery (image/edit/video/audio success path):
-            # The tool handler already did orig_msg.reply() with the fun Grok-style message + attachment/URLs.
-            # No need to send the SUCCESS result back to the model (which would trigger a 2nd API call
-            # just to have the model "stay silent" or say a confirmation we then discard).
-            # This makes media generation feel much lighter, faster, and more natural (single roundtrip).
-            if direct_delivery_performed:
-                logger.info(f"{cid_p}[LLM] Round {round_num}: direct delivery performed ΓÇö short-circuiting (skip sending tool results back + no further rounds). Natural + cheap.")
-                break
-
-            logger.info(f"{cid_p}[LLM] Round {round_num}: sending back {len(client_tool_outputs)} tool result(s) using previous_response_id")
-
-            try:
-                prev_id = getattr(response, "id", None)
-                cache_key = _get_prompt_cache_key(original_message)
-
-                continuation_tools = get_tools_for_request(
-                    query_need=need,
-                    has_visual_intent=effective_visual_intent,
-                    has_explicit_video_intent=explicit_video_intent,
-                    has_explicit_audio_intent=explicit_audio_intent,
-                    is_tool_continuation=True,
-                    pure_image_gen=pure_image_gen_intent,
-                    pure_video_gen=pure_video_gen_intent,
-                )
-
-                # === Native search tools on continuation ===
-                # By default, do NOT re-send native_search_tools (web_search + x_search) on
-                # continuation rounds. This is the main token-saving change.
-                #
-                # Philosophy:
-                # - Rely on previous_response_id: the model retains knowledge of tools that were
-                #   offered in prior turns of the conversation (see similar logic for custom tools
-                #   in get_continuation_tools).
-                # - Re-sending the native tools (especially with their descriptions) on every cont
-                #   adds unnecessary prompt tokens.
-                # - Custom tools are already aggressively minimized on cont.
-                #
-                # To still allow follow-up searches when genuinely useful:
-                # - We inspect the *previous* response's output for evidence of search usage
-                #   (web_search_call items etc.). If search happened in the just-completed round,
-                #   we re-include the native tools so Grok can easily do a refined/follow-up search.
-                # - If no recent search, send empty list for native on this cont.
-                # - This is pragmatic: most continuations after custom tools don't need fresh
-                #   search, but if they do (e.g. after seeing a custom result that prompts more
-                #   research), we enable it.
-                continuation_native_search_tools: list[dict] = []
-                try:
-                    prev_output = getattr(response, "output", None) or []
-                    for item in prev_output:
-                        itype = getattr(item, "type", None)
-                        if isinstance(item, dict):
-                            itype = item.get("type")
-                        itype_str = str(itype or "").lower()
-                        if itype_str and ("web_search" in itype_str or "x_search" in itype_str or "search_call" in itype_str):
-                            continuation_native_search_tools = native_search_tools
-                            break
-                except Exception:
-                    pass
-
-                offered_custom_tool_names = {t.get("name") for t in continuation_tools if t.get("name")}
-                try:
-                    img_search = False
-                    img_understand = False
-                    for t in continuation_native_search_tools:
-                        if t.get("type") == "web_search":
-                            img_search = t.get("enable_image_search", False)
-                            img_understand = t.get("enable_image_understanding", False)
-                            break
-
-                    log_tool_selection(
-                        turn_type="continuation",
-                        query_need=need,
-                        has_visual_intent=effective_visual_intent,
-                        custom_tools=continuation_tools,
-                        native_search_tools=continuation_native_search_tools,
-                        enable_image_search=img_search,
-                        enable_image_understanding=img_understand,
-                    )
-                except Exception as log_err:
-                    logger.debug(f"{cid_p}[TOOLS] selection logging failed (continuation): {log_err}")
-
-                response = await _call_responses_with_retry(
-                    client,
-                    model=model,
-                    input=client_tool_outputs,
-                    previous_response_id=prev_id,
-                    tools=[
-                        *continuation_native_search_tools,
-                        *continuation_tools,
-                    ],
-                    extra_body={"prompt_cache_key": cache_key},
-                )
-            except Exception as continue_err:
-                # After internal retries, only persistent errors reach here
-                logger.warning(f"{cid_p}[LLM] Continuation with previous_response_id failed: {continue_err} ΓÇö stopping tool loop")
-                break
-
-            # Token logging for continuation
-            continuation_cache_context = {
-                "turn_type": "continuation",
-                "query_need": need,
-                "has_visual_intent": effective_visual_intent,
-                "custom_tools_count": len(continuation_tools),
-                "custom_tools_set": _infer_tools_set_name(need, effective_visual_intent, True),
-                "user_id": user_id,
-                "prefix_stability_indicator": f"sys~{stable_prefix_len}",
-            }
-
-            _extract_and_log_token_usage(
-                response,
+        # === Phase 3: Tool execution loop + continuation (previous_response_id) ===
+        response, direct_delivery_performed, model_chose_search, model_chose_direct = (
+            await _execute_tool_loop(
+                client=client,
                 model=model,
-                has_images=bool(image_urls),
-                category="Tool",
-                is_tool_continuation=True,
-                cache_context=continuation_cache_context,
+                response=response,
+                need=need,
+                user_id=user_id,
+                stable_prefix_len=stable_prefix_len,
+                effective_visual_intent=effective_visual_intent,
+                explicit_video_intent=explicit_video_intent,
+                explicit_audio_intent=explicit_audio_intent,
+                pure_image_gen_intent=pure_image_gen_intent,
+                pure_video_gen_intent=pure_video_gen_intent,
+                native_search_tools=native_search_tools,
+                offered_custom_tool_names=offered_custom_tool_names,
+                original_message=original_message,
+                image_urls=image_urls,
+                is_addressed=is_addressed,
+                cid_p=cid_p,
             )
+        )
 
         # Emit addressed-turn metrics (lightweight, defensive).
         if is_addressed and addressed_turn_start is not None:

@@ -17,6 +17,9 @@ Key features:
 
 from __future__ import annotations
 
+# Tool descriptions for media/delivery are intentionally detailed here (user-visible effect).
+# High-level "when to use search / vision / recent context" guidance lives in prompt_builder.
+
 import asyncio
 import logging
 from typing import Any
