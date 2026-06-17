@@ -110,6 +110,12 @@ scratch*.py
 # These often contain plans, summaries, and debug output that should never be committed.
 tmp/
 
+# Grok Build / Cursor auto-generated MCP tool-descriptor cache (never commit).
+# Recreated when MCP servers are active; neutralized for this project via .grok/config.toml.
+mcps/
+mcp-tool-schemas/
+agent-tools/
+
 # -----------------------------------------------------------------------------
 # Testing, coverage, and quality tooling caches
 # -----------------------------------------------------------------------------
