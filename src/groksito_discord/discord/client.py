@@ -40,7 +40,7 @@ from ..utils.correlation import (
     generate_correlation_id,
     set_correlation_id,
 )
-from ..utils.errors import log_auxiliary_failure, safe_auxiliary
+from ..utils.errors import log_auxiliary_failure
 
 import discord
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import Any, Callable, TypeVar
+from typing import Callable, TypeVar
 
 from .correlation import cid_prefix
 

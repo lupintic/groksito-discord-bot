@@ -186,6 +186,32 @@ def test_prepare_skill_injection_bad_skill_id_returns_none(monkeypatch, tmp_path
     assert any("does not exist" in r.message for r in caplog.records)
 
 
+def test_normalize_bot_emoji_output_upgrades_shortcode(monkeypatch, tmp_path):
+    from groksito_discord.utils import emoji_registry
+
+    guild_id = "111"
+    emoji_registry._EMOJI_KNOWLEDGE = {
+        "version": 1,
+        "guilds": {
+            guild_id: {
+                "emojis": {
+                    "999": {
+                        "id": "999",
+                        "name": "jaja",
+                        "url": "https://cdn.discordapp.com/emojis/999.webp",
+                        "animated": False,
+                        "usage_count": 1,
+                    }
+                }
+            }
+        },
+    }
+    emoji_registry._LOADED = True
+
+    result = emoji_registry.normalize_bot_emoji_output(":jaja: nice", guild_id)
+    assert "<:jaja:999>" in result
+
+
 def test_env_utils_parse_failure_logs_warning(tmp_path, caplog):
     caplog.set_level(logging.WARNING)
 

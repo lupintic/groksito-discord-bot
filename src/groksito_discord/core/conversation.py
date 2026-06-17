@@ -582,7 +582,7 @@ async def _invoke_groksito(
             # Normalize any accidental raw Discord emoji syntax <:name:ID> back to clean :name:
             # so the emoji actually renders. The model sometimes emits the internal format.
             try:
-                from . import emoji_registry
+                from ..utils import emoji_registry
                 gid = getattr(message.guild, "id", None) if getattr(message, "guild", None) else None
                 response_text = emoji_registry.normalize_bot_emoji_output(response_text, gid)
             except Exception as emoji_norm_err:
