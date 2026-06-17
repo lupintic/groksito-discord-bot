@@ -47,3 +47,14 @@ def test_visual_query_enables_image_flags():
     web = next(t for t in tools if t["type"] == "web_search")
     assert web.get("enable_image_search") is True
     assert web.get("enable_image_understanding") is True
+def test_time_sensitive_query_offers_search_tools():
+    """Time-sensitive queries (e.g. today/hoy/live) still receive native search tools (no regression on offering)."""
+    tools = _build_native_search_tools(
+        query_text='qué pasó hoy en Argentina',
+        context_need='normal',
+        has_visual_intent=False,
+        has_attached_images=False,
+    )
+    types = {t['type'] for t in tools}
+    assert types == {'web_search', 'x_search'}
+

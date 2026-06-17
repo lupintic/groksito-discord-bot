@@ -93,3 +93,28 @@ class TestNativeSearchBreadthDescriptions:
         web = next(t for t in tools if t["type"] == "web_search")
         assert "1-2" not in web["description"]
         assert "product/tool options" in web["description"]
+class TestProactiveSearchGuidance:
+    """Additive coverage for the proactive freshness / recency bias (2026-06 feature)."""
+
+    def test_system_prompt_and_descriptions_include_freshness_proactive_cues(self):
+        from groksito_discord.llm.prompt_builder import SYSTEM_PROMPT, get_native_search_descriptions
+        lowered = SYSTEM_PROMPT.lower()
+        assert "proactively" in lowered
+        assert "up-to-date" in lowered or "fresh" in lowered or "freshness" in lowered
+
+        web, x = get_native_search_descriptions("qué pasó hoy")
+        combined = (web + " " + x).lower()
+        assert "proactively" in combined
+        assert "up-to-date" in combined or "fresh" in combined
+
+    def test_time_sensitive_query_still_offers_search(self):
+        from groksito_discord.llm.llm_utils import _build_native_search_tools
+        tools = _build_native_search_tools(
+            query_text="score del partido de hoy",
+            context_need="normal",
+            has_visual_intent=False,
+            has_attached_images=False,
+        )
+        types = {t["type"] for t in tools}
+        assert types == {"web_search", "x_search"}
+
