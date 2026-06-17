@@ -94,7 +94,7 @@ Discord (Gateway + REST)
 - Defensive .env writer: full original file preserved, atomic writes, timestamped + rolling backups, critical key recovery on corruption.
 - Status cards reflect bot heartbeats written by the Discord process.
 
-### 7. Media Stack (`media/`, `image_delivery.py`, `image_*.py`, `video_generation.py`)
+### 7. Media Stack (`media/`, `delivery.py`, `*_handler.py`)
 - Centralized handlers for generation + editing with improved prompt handling and Spanish-friendly behavior.
 - Direct delivery protocol: a request is registered before calling the generator; the delivery module sends the asset publicly and marks a sentinel so the LLM path produces exactly one reply.
 - Audio reuses the same delivery + bubble system for waveform-style voice messages.

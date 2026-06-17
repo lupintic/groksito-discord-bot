@@ -1,17 +1,16 @@
 """
-Thin public re-export layer for Groksito media tools.
+Public media-tools surface for Groksito.
 
-Stable import surface. All real image generation + editing logic has been
-centralized in the modern `media/image_handler.py` (improved prompt engineering,
-unified error handling, better Spanish support, future-proof param passing).
+Callers (llm/tools.py, llm/client.py, health.py) import from here for:
+- Feature flags (ENABLE_VIDEO_GENERATION)
+- Explicit intent gates (has_explicit_video_intent, has_explicit_audio_intent)
+- Handler entry points re-exported from the canonical media handlers
 
-This module only re-exports so that existing callers (tools.py, llm.py, health.py,
-video_generation.py etc.) require zero changes.
-
-Implementation lives in:
-- media/image_handler.py   (Text-to-Image + Image-Edit, modernized)
-- media/video_handler.py   (Text-to-Video + Image-to-Video, modernized with prompt enhancement)
-- image_delivery.py        (direct delivery + request tracking)
+Implementations live in:
+- media/image_handler.py  (Text-to-Image + Image-Edit)
+- media/video_handler.py  (Text-to-Video + Image-to-Video)
+- media/audio_handler.py  (TTS)
+- media/delivery.py       (direct delivery + request tracking)
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ ENABLE_VIDEO_GENERATION: bool = settings.enable_video_generation
 
 
 # =============================================================================
-# Re-exports (stable public surface — now backed by centralized image_handler)
+# Handler entry points (canonical implementations in media/*_handler.py)
 # =============================================================================
 
 # Video — now served from the dedicated modern handler (following the image_handler pattern)
