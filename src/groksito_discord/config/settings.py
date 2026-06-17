@@ -344,8 +344,8 @@ class GroksitoSettings(BaseSettings):
             raise RuntimeError(
                 f"Missing required configuration: {', '.join(missing)}. "
                 "Please set them in your .env file before starting the bot. "
-                "Tip: Run `python -m src.groksito_discord --status` for a full health report (works without secrets). "
-                "OAuth options: GROK_AUTH_MODE=oauth + `python -m src.groksito_discord --login-oauth` (no XAI_API_KEY needed), "
+                "Tip: Run `python -m groksito_discord --status` for a full health report (works without secrets). "
+                "OAuth options: GROK_AUTH_MODE=oauth + `python -m groksito_discord --login-oauth` (no XAI_API_KEY needed), "
                 "or GROK_AUTH_MODE=auto to prefer OAuth tokens when present with fallback to key."
             )
 

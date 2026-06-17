@@ -17,7 +17,7 @@ Discord (Gateway + REST)
         │
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Groksito Bot Process (python -m src.groksito_discord)      │
+│  Groksito Bot Process (groksito / python -m groksito_discord) │
 │  ┌──────────────┐   ┌──────────────────┐   ┌─────────────┐ │
 │  │ client.py    │──▶│ conversation.py  │──▶│ llm/client  │ │
 │  │ (on_message, │   │ (activation,     │   │ (Responses  │ │
@@ -107,7 +107,7 @@ Discord (Gateway + REST)
 - Directories (`data/`, `oauth/`) ensured at startup.
 
 ### 9. Packaging & Deployment
-- `pyproject.toml` + `setup.py` (entry point `groksito`).
+- `pyproject.toml` (entry point `groksito`) + `scripts/configure_env.py` (interactive .env setup).
 - Multi-stage Dockerfile: `bot` (full, with ffmpeg) vs `web` (slim, ~280-400MB).
 - `docker-compose.yml`: two services that can run independently. Recommended volumes for persistence.
 - `requirements.txt` (bot + web) and `requirements-web.txt` (dashboard only).

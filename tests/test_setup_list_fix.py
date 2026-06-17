@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 # Prefer the real shared module (the single source of truth after the rework).
-# Fall back to exec'ing setup.py only if needed (for its local fallback path).
+# Fall back to exec'ing configure_env.py only if needed (for its local fallback path).
 SRC = Path(__file__).resolve().parent / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -18,12 +18,12 @@ try:
     )
     print('Helpers loaded from src/groksito_discord/env_utils.py (unified)')
 except Exception:
-    # Legacy fallback for the test: pull names from setup.py's local definitions
-    code = open('setup.py', encoding='utf-8').read()
+    # Legacy fallback for the test: pull names from configure_env.py's local definitions
+    code = open('scripts/configure_env.py', encoding='utf-8').read()
     namespace = {}
     exec(code.split('def main() -> None:')[0], namespace)
     globals().update(namespace)
-    print('Helpers loaded from setup.py (fallback path)')
+    print('Helpers loaded from scripts/configure_env.py (fallback path)')
 
 # Test _format for list -> must be compact json for bare capture + pydantic
 formatted_list = _format_env_value([463553669477171200, 316109851640201217])

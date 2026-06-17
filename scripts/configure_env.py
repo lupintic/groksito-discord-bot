@@ -5,7 +5,7 @@ Groksito - Configuración Segura Interactiva (estilo Hermes Agent)
 Ejecuta esto para crear o reparar tu archivo .env de forma profesional y segura.
 
 Uso:
-    python setup.py
+    python scripts/configure_env.py
 
 Características:
 - 100% seguro de ejecutar muchas veces (idempotente).
@@ -44,16 +44,15 @@ ENV_FILE = Path(".env")
 # =============================================================================
 # Unified safe .env logic (single source of truth)
 # We prefer to import the shared implementation from src/groksito_discord/env_utils.
-# If that fails (e.g. running setup.py before the package is installed / from a
-# weird working dir), we fall back to a minimal local copy of the critical
-# functions so setup.py remains the "always works" recovery tool.
+# If that fails (e.g. running configure_env.py before the package is installed),
+# we fall back to a minimal local copy so the script remains an "always works" recovery tool.
 # =============================================================================
 
 def _import_shared_env_utils():
     """Try to pull the real implementations from the package."""
     try:
         # Make src importable (same pattern the web dashboard uses)
-        src_dir = Path(__file__).resolve().parent / "src"
+        src_dir = Path(__file__).resolve().parent.parent / "src"
         if str(src_dir) not in sys.path:
             sys.path.insert(0, str(src_dir))
         from groksito_discord.utils.env_utils import (
@@ -101,7 +100,7 @@ if _SHARED:
     PROTECTED_KEYS = _SHARED["PROTECTED_KEYS"]
 else:
     # --- Minimal fallback implementations (kept in sync with env_utils.py) ---
-    # Only used if the import above completely fails. This keeps setup.py usable
+    # Only used if the import above completely fails. Keeps configure_env.py usable
     # as a last-resort recovery tool even in broken checkouts.
     import re
     import shutil
@@ -394,7 +393,7 @@ def _try_run_oauth_login() -> bool:
     say("\n--- Login OAuth (SuperGrok / X Premium+) ---")
     try:
         # Asegurar que podemos importar desde src
-        src_dir = Path(__file__).resolve().parent / "src"
+        src_dir = Path(__file__).resolve().parent.parent / "src"
         if str(src_dir) not in sys.path:
             sys.path.insert(0, str(src_dir))
 
@@ -402,7 +401,7 @@ def _try_run_oauth_login() -> bool:
     except Exception as e:
         say(f"No se pudo cargar el módulo de OAuth: {e}", "red")
         say("Puedes ejecutarlo manualmente después:")
-        say("    python -m src.groksito_discord --login-oauth")
+        say("    python -m groksito_discord --login-oauth")
         say("    (o con --no-browser / --print-url-only según tu caso)")
         return False
 
@@ -422,7 +421,7 @@ def _try_run_oauth_login() -> bool:
             return True
         else:
             say("El login OAuth no se completó (puede que hayas cancelado o haya habido un error).", "yellow")
-            say("Puedes reintentarlo después con: python -m src.groksito_discord --login-oauth")
+            say("Puedes reintentarlo después con: python -m groksito_discord --login-oauth")
             return False
     except KeyboardInterrupt:
         say("\nLogin interrumpido por el usuario.", "yellow")
@@ -475,7 +474,7 @@ def _bootstrap_from_template() -> bool:
             ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
         skeleton = (
             "# Groksito Discord Bot - Configuración mínima generada\n"
-            "# Ejecuta `python setup.py` de nuevo para completarla.\n\n"
+            "# Ejecuta `python scripts/configure_env.py` de nuevo para completarla.\n\n"
             "DISCORD_BOT_TOKEN=\n"
             "XAI_API_KEY=\n"
             "GROK_AUTH_MODE=api_key\n"
@@ -540,7 +539,7 @@ def main() -> None:
         changed = deduplicate_env_file(ENV_FILE, keep="last", make_backup=True)
         if changed:
             say("✅ Duplicados eliminados. Se crearon backups (.env.backup y con timestamp).", "green")
-            say("   Vuelve a correr `python setup.py` si también quieres rellenar valores que faltan.")
+            say("   Vuelve a correr `python scripts/configure_env.py` si también quieres rellenar valores que faltan.")
         else:
             say("No se encontraron claves duplicadas. Tu .env ya está limpio.")
         say("\nListo.")
@@ -699,7 +698,7 @@ def main() -> None:
         if will_need_oauth or (_get_ci(existing, "GROK_AUTH_MODE") or "").lower() in ("oauth", "auto"):
             if confirm("¿Quieres lanzar el login OAuth ahora?", default=True):
                 _try_run_oauth_login()
-        say("\nTip: puedes volver a ejecutar `python setup.py` cuando quieras.")
+        say("\nTip: puedes volver a ejecutar `python scripts/configure_env.py` cuando quieras.")
         return
 
     say(f"\nA punto de actualizar de forma segura {len(updates)} valor(es): {', '.join(sorted(updates.keys()))}")
@@ -725,11 +724,11 @@ def main() -> None:
     # ============================================================
     say("\n--- Pasos recomendados ---")
     say("  1. Valida la configuración:")
-    say("       python -m src.groksito_discord --status")
-    say("       python -m src.groksito_discord --check")
+    say("       python -m groksito_discord --status")
+    say("       python -m groksito_discord --check")
     say("  2. Si cambiaste algo desde el web dashboard, reinicia el bot de Discord.")
     say("  3. Para iniciar el bot:")
-    say("       python -m src.groksito_discord")
+    say("       python -m groksito_discord")
 
     current_final_mode = _get_ci(parse_env_file(ENV_FILE), "GROK_AUTH_MODE") or updates.get("GROK_AUTH_MODE", "")
     if current_final_mode.lower() in ("oauth", "auto") or will_need_oauth:
@@ -737,7 +736,7 @@ def main() -> None:
         if confirm("¿Quieres ejecutar el login OAuth ahora (recomendado si elegiste oauth/auto)?", default=True):
             _try_run_oauth_login()
 
-    say("\nListo. Puedes volver a correr `python setup.py` cuantas veces quieras. Es idempotente y seguro.")
+    say("\nListo. Puedes volver a correr `python scripts/configure_env.py` cuantas veces quieras. Es idempotente y seguro.")
 
 if __name__ == "__main__":
     try:

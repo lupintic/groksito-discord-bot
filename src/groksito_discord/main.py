@@ -4,8 +4,9 @@ Groksito Discord Bot — Main Entry Point (Standalone)
 Fully wired conversational entrypoint.
 
 Usage:
-    python -m src.groksito_discord
-    python -m src.groksito_discord --check   # Validate config only
+    groksito
+    python -m groksito_discord
+    groksito --check   # Validate config only
 """
 
 from __future__ import annotations
@@ -330,7 +331,7 @@ def run() -> None:
                 bearer = get_grok_bearer()
             if not bearer:
                 print("\n❌ No usable credential. Run one of:")
-                print("   python -m src.groksito_discord --login-oauth")
+                print("   groksito --login-oauth")
                 print("   # or set XAI_API_KEY in .env")
                 sys.exit(1)
 

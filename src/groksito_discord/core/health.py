@@ -194,12 +194,7 @@ def get_health_status() -> dict[str, Any]:
 
     for name in modules_to_check:
         try:
-            # When running as `python -m src.groksito_discord`, the package name inside is 'src.groksito_discord'
-            # When installed normally, it is 'groksito_discord'
-            try:
-                __import__(f"groksito_discord.{name}")
-            except ImportError:
-                __import__(f"src.groksito_discord.{name}")
+            __import__(f"groksito_discord.{name}")
             status["modules"][name] = "loaded"
         except Exception as e:
             status["modules"][name] = f"error: {e}"

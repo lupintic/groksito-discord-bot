@@ -2,7 +2,7 @@
 Standalone test for the unified safe .env logic (now lives in src/groksito_discord/env_utils.py).
 
 This test imports the real shared implementation so we catch regressions
-in the single source of truth used by both setup.py and the web dashboard.
+in the single source of truth used by both scripts/configure_env.py and the web dashboard.
 """
 
 import tempfile

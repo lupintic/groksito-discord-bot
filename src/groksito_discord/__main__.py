@@ -2,9 +2,8 @@
 Entry point for running Groksito as a module.
 
 Usage:
-    python -m src.groksito_discord
-    or
-    python -m groksito_discord   (after proper packaging)
+    python -m groksito_discord
+    groksito   (console script after pip install -e .)
 """
 
 from .main import run

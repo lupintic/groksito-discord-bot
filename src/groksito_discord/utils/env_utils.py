@@ -4,7 +4,7 @@ Unified, robust .env file management for Groksito.
 
 This module provides a SINGLE source of truth for all .env read/write operations
 used by both:
-  - setup.py (interactive safe setup / repair / dedup)
+  - scripts/configure_env.py (interactive safe setup / repair / dedup)
   - web/main.py (dashboard config editor)
 
 Core guarantees (the whole point of the rework):
@@ -25,18 +25,18 @@ Core guarantees (the whole point of the rework):
   respected here (setup can still change them because it is the privileged tool).
 
 This replaces the previous duplicated-and-slightly-different implementations
-that lived in setup.py and web/main.py (and the standalone test copy).
+that lived in configure_env.py and web/main.py (and the standalone test copy).
 Drift between those copies was a major contributor to the duplication bugs.
 
 Usage (preferred):
-    from src.groksito_discord.utils.env_utils import (
+    from groksito_discord.utils.env_utils import (
         safe_write_env, parse_env_file, parse_env_lines,
         deduplicate_env_file, backup_env, CRITICAL_KEYS, PROTECTED_KEYS,
     )
 
     ok, msg, backup = safe_write_env(Path(".env"), {"LOG_LEVEL": "DEBUG"})
 
-The functions are intentionally dependency-light (stdlib only) so setup.py
+The functions are intentionally dependency-light (stdlib only) so scripts/configure_env.py
 can import them even in minimal environments.
 """
 
@@ -65,7 +65,7 @@ CRITICAL_KEYS: set[str] = {
 }
 
 # Keys that control authentication and must not be tampered with by the
-# unprivileged web dashboard. setup.py (the CLI tool) is allowed to manage them.
+# unprivileged web dashboard. scripts/configure_env.py (the CLI tool) is allowed to manage them.
 OAUTH_KEYS: set[str] = {
     "GROK_AUTH_MODE",
     "GROK_OAUTH_PORT",
@@ -126,7 +126,7 @@ def _format_env_value(val: Any) -> str:
 
 def _format_list_for_display(val: Any) -> str:
     """
-    Tolerant converter used by interactive prompts (setup.py).
+    Tolerant converter used by interactive prompts (scripts/configure_env.py).
 
     Accepts:
       - Python list
@@ -320,7 +320,7 @@ def safe_write_env(
     protected_keys: set[str] | None = None,
 ) -> tuple[bool, str, Path | None]:
     """
-    The single robust writer used by both setup.py and the web dashboard.
+    The single robust writer used by both scripts/configure_env.py and the web dashboard.
 
     Contract:
     - Creates a backup (timestamped + rolling) before touching the file (when it exists).
@@ -343,7 +343,7 @@ def safe_write_env(
 
     protected_keys: optional extra set of keys that must never be written by this call.
                     (The web layer passes PROTECTED_KEYS here as a hard belt-and-suspenders.)
-                    setup.py normally passes None so it can manage auth keys.
+                    scripts/configure_env.py normally passes None so it can manage auth keys.
 
     Returns: (success: bool, message: str, backup_path_or_None)
     """
@@ -460,7 +460,7 @@ def load_template_as_lines(template_path: Path | None = None) -> list[str]:
     """
     Return the lines of a .env template (usually .env.example) if present.
 
-    This lets setup.py do a "clean fresh start based on the documented template"
+    This lets scripts/configure_env.py do a "clean fresh start based on the documented template"
     instead of an empty file when the user chooses the nuclear "FRESH" option
     or when no .env exists at all.
     """
@@ -490,7 +490,7 @@ def create_fresh_env_from_template(
     """
     Create (or replace) target .env using the template as base, then apply overrides.
 
-    This is used by the "Start FRESH" path in setup.py. It still does a backup
+    This is used by the "Start FRESH" path in scripts/configure_env.py. It still does a backup
     of any pre-existing .env.
     """
     backup_path = backup_env(target) if target.exists() else None
