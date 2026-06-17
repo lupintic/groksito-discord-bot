@@ -19,8 +19,7 @@ Key modernizations (following the image pattern):
 - Quota enforcement (5/day) kept honest and simple.
 - Clean separation of concerns.
 
-All previous logic from video_generation.py has been moved here and improved.
-The public dispatch functions keep identical signatures.
+Canonical video handler; public dispatch functions keep stable signatures.
 
 Implementation is fully compatible with the normal chat flow, tool selection, and
 DIRECT_DELIVERY_PERFORMED sentinel pattern.

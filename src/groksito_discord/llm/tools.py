@@ -637,7 +637,6 @@ def get_tools_for_request(
 
         if is_explicit_video:
             try:
-                from .media_tools import _generate_video_schema
                 tools.append(_generate_video_schema())
             except Exception:
                 pass
@@ -674,7 +673,6 @@ def get_tools_for_request(
         tools.append(_edit_image_schema())
         if ENABLE_VIDEO_GENERATION and has_explicit_video_intent:
             try:
-                from .media_tools import _generate_video_schema
                 tools.append(_generate_video_schema())
             except Exception:
                 pass
