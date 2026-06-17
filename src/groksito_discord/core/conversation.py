@@ -23,18 +23,12 @@ from ..media.delivery import DIRECT_DELIVERY_PERFORMED
 from ..core.intent import is_image_edit_request
 from ..llm.llm_utils import _detect_image_creation_intent
 
-# Centralized text utilities (Phase 2). Aliases preserve the original private
-# names used throughout this file so that no call sites inside conversation.py
-# needed to change.
 from ..utils.text import (
     extract_urls_from_text as _extract_urls_from_text,
     extract_x_links as _extract_x_links,
     extract_image_urls_from_text as _extract_image_urls_from_text,
 )
 
-# Centralized intent/keyword data (Phase 5). We import with the original names
-# (including the private _has_* aliases) so that the rest of this file and all
-# its internal call sites require zero modifications.
 from .intent import (
     STRONG_DIRECTED_KEYWORDS,
     GENERAL_REPLY_INQUIRY_KEYWORDS,
@@ -51,16 +45,6 @@ logger = logging.getLogger("groksito.conversation")
 # Older ones are skipped for native vision to avoid 404s when the xAI backend fetches;
 # the message text + get_recent_context tool (when offered) + user description remain available.
 _RECENT_VISION_MAX_AGE_SECONDS: int = 15 * 60  # 15 minutes is conservative for "recent visual referent"
-
-# URL / link extraction helpers were moved to src/groksito_discord/utils/text.py
-# (Phase 2 centralization). They are re-exported above via aliases so the rest
-# of this file (and its call sites) required zero other modifications.
-# The implementations are now the single source of truth.
-
-# STRONG_DIRECTED_KEYWORDS / GENERAL_REPLY_INQUIRY_KEYWORDS and the two
-# _has_*_intent functions were moved to intents.py (Phase 5).
-# They are imported (with original names) at the top of this file.
-
 
 async def _resolve_referenced_and_activation(
     message: Any,

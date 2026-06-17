@@ -20,11 +20,8 @@ Important invariants (do not break):
 - Context (short-term channel history) is always updated for *every* message.
 - Strict activation policy: only @mentions or direct replies to Groksito messages.
 - Direct media delivery uses the DIRECT_DELIVERY_PERFORMED sentinel
-  (cooperates with image_delivery.py + llm.py to guarantee exactly one reply).
+  (cooperates with media/delivery.py + llm/client.py for exactly one reply).
 - Background heartbeat task keeps the web UI informed of connection status.
-
-Phase 3 (this refactoring): Slash commands were extracted to a dedicated
-registration function for better structure. No behavior changed.
 """
 
 from __future__ import annotations
@@ -59,8 +56,6 @@ from ..core.safety import safe_reply as _safe_reply
 # Data fetching and game resolution live in discord/integrations/.
 from .integrations import steam, twitch
 
-# Centralized text utilities (Phase 2). Replaces inline URL extraction that
-# duplicated logic from conversation.py.
 from ..utils.text import extract_urls_from_text
 
 # Dedicated /audio slash (reuses 100% of audio_handler.py for TTS + fancy voice delivery
@@ -324,25 +319,12 @@ def _build_steam_game_embeds(games: list[dict[str, Any]]) -> list[discord.Embed]
 
 
 # =============================================================================
-# Slash Command Registration (Phase 3)
+# Slash Command Registration
 # =============================================================================
 def register_slash_commands(
     tree: "discord.app_commands.CommandTree", client: "discord.Client"
 ) -> None:
-    """Register Groksito's slash commands on the provided CommandTree.
-
-    This function was extracted in Phase 3 to improve organization and
-    readability of client.py. The command definitions used to live inline
-    inside ensure_discord_connected.
-
-    All command names, descriptions, parameters, implementation logic,
-    guild whitelist checks, rate limiting, defer/followup behavior,
-    error messages, and user-visible output are **exactly** the same
-    as before. No behavior was changed.
-
-    The /steamchart and /stmchr commands delegate to the steam integration
-    module (extracted in Phase 1).
-    """
+    """Register Groksito slash commands. Steam commands delegate to discord/integrations/steam.py."""
     # /mislimites ΓÇö shows remaining requests for the current user (rate limit info)
     @tree.command(
         name="mislimites", description="Muestra cu├íntas requests te quedan en este minuto"
@@ -367,7 +349,6 @@ def register_slash_commands(
     # game-themed color when known, clickable title to Steam store, and thumbnail image).
     # Thumbnails use the same robust resolver as /stmchr (multiple CDNs + store scrape fallback).
     # If no thumbnail resolves, falls back to the standard Steam header.jpg (same as /stmchr).
-    # Implementation delegates to the extracted steam integration (Phase 1).
     @tree.command(
         name="steamchart",
         description="Muestra jugadores concurrentes en Steam. Ej: /steamchart black desert, path of exile 2",
@@ -720,13 +701,6 @@ def register_slash_commands(
 
 
 # =============================================================================
-# Steam integration lives in src/groksito_discord/discord/integrations/steam.py
-# All Steam player count fetching, scraping, game resolution, and data structures
-# were extracted here. The two slash commands (registered above) delegate to it.
-# No behavior was changed.
-# =============================================================================
-
-# =============================================================================
 # Main Connection Function (Conversational Only)
 # =============================================================================
 async def ensure_discord_connected(conversational: bool = True) -> "discord.Client":
@@ -762,7 +736,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
     _discord_client.rate_limiter = rate_limiter
     _discord_client.command_tree = tree
 
-    # Register slash commands (factored out in Phase 3 for structure).
+    # Register slash commands.
     # This call must happen after the client and rate_limiter are attached.
     # All three commands (/mislimites, /steamchart, /stmchr) are now defined
     # in register_slash_commands above.
@@ -948,7 +922,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
                         if obj and getattr(obj, "url", None):
                             image_urls.append(obj.url)
                 # Links / URLs from text content
-                # Now uses the centralized implementation (Phase 2) to eliminate
+                # Centralized URL extraction (utils/text.py).
                 # duplication with conversation.py extractors. Behavior is identical.
                 if message.content:
                     for clean in extract_urls_from_text(message.content):

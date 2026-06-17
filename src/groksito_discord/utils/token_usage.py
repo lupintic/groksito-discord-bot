@@ -37,7 +37,7 @@ DEFAULT_PRICING: dict[str, float] = {
 
 
 _recent_usage: deque[dict[str, Any]] = deque(maxlen=50)
-_recent_addressed: deque[dict[str, Any]] = deque(maxlen=50)  # Phase 1 addressed turn metrics (latency, choice, search offered)
+_recent_addressed: deque[dict[str, Any]] = deque(maxlen=50)  # Addressed-turn metrics ring buffer
 _session_totals: dict[str, float | int] = {
     "prompt_tokens": 0,
     "completion_tokens": 0,
@@ -319,7 +319,7 @@ def log_addressed_turn_metrics(
     custom_tools_used: list[str] | None = None,
     **_: Any,
 ) -> None:
-    """Lightweight addressed-turn instrumentation (Ticket #7 Phase 1 + #23 observability).
+    """Lightweight addressed-turn instrumentation for observability.
 
     Structured [ADDRESSED] logs + append to small in-mem _recent_addressed deque.
     Captures key signals about Grok's tool choices (search, direct, recent context, media, delivery).

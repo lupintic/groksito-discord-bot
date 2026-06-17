@@ -1,23 +1,4 @@
-"""
-Centralized text and link extraction utilities.
-
-This module was introduced in Phase 2 of the refactoring to eliminate
-duplicated URL/link extraction logic that previously existed in both
-`conversation.py` (as private helpers) and inline inside `client.py`
-(on_message context harvesting).
-
-Functions:
-- extract_urls_from_text
-- extract_x_links
-- extract_image_urls_from_text
-
-All three preserve **exact** previous behavior, cleaning rules,
-priority ordering, and output as the original implementations.
-
-Intended for use by conversation handling, context building, and
-any future text processing that needs robust http(s) URL extraction
-with punctuation stripping and domain-specific filtering.
-"""
+"""URL and link extraction shared by conversation.py and discord/client.py."""
 
 from __future__ import annotations
 

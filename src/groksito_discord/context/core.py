@@ -131,7 +131,6 @@ def _get_context_file_path() -> Path:
             return fallback
         return p
     except Exception as e:
-        # Default filename kept for data compat (legacy pantsu name)
         fallback = Path.cwd() / "data" / "pantsu_context.json"
         logger.error(
             f"[Context] Error resolving context_file, using safe fallback {fallback}: {e}"

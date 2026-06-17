@@ -191,8 +191,8 @@ groksito --status
 
 ## References
 
-- Implementation: `src/groksito_discord/grok_oauth.py`
-- CLI and Docker detection: `src/groksito_discord/bot.py`
+- Implementation: `src/groksito_discord/core/grok_oauth.py`
+- CLI entry: `src/groksito_discord/main.py` (`groksito` console script)
 - Central credential helper: `get_grok_bearer()`
 - All LLM and media paths route through the same credential mechanism.
 - Related config: `GROK_AUTH_MODE`, related `using_oauth` / `auth_prefers_oauth` logic.

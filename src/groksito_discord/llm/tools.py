@@ -127,7 +127,7 @@ async def execute_hybrid_tool(
     """
     try:
         # Lightweight structured logging of *actual model decisions* to invoke specific tools.
-        # Complements log_tool_selection (which logs schemas *offered*). See ticket #23.
+        # Complements log_tool_selection (schemas offered vs. decisions taken).
         # Gated by same flag; only logs keys (no arg values) for privacy/low overhead.
         try:
             from ..config import settings
@@ -601,7 +601,7 @@ def get_tools_for_request(
     # The base model just responds (with only referenced message injected on bot-replies).
     # reply_to_user (plus react_to_message / create_thread) become available when light/full decision tools are offered
     # (plain addressed turns) or on continuations, giving the model explicit choice over delivery style.
-    # This advances the agentic goal (see ticket #21 and Target Architecture #9).
+    # Light decision tools give the model delivery agency on addressed turns.
     if query_need == "casual" and not offer_light_decision_tools:
         return []
 

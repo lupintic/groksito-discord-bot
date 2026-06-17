@@ -248,7 +248,7 @@ async def call_grok_for_groksito(
         # tokens on multi-round flows (the search tool descriptions are non-trivial).
         if need in ("casual", "image_gen") or (need == "minimal" and not is_addressed):
             # Explicit laziness in the main llm flow (builder will also return []).
-            # Relaxed for addressed minimal (Phase 1 agentic): plain @mentions that classify minimal
+            # Addressed minimal turns may still get light decision tools.
             # still get native search schemas so Grok + respond_directly can decide; keeps classify for extremes.
             native_search_tools = []
         else:
@@ -289,7 +289,7 @@ async def call_grok_for_groksito(
         except Exception as log_err:
             logger.debug(f"{cid_p}[TOOLS] selection logging failed: {log_err}")
 
-        # Phase 1 (Ticket #7): lightweight instrumentation for addressed turns only.
+        # Lightweight instrumentation for addressed turns only.
         # Capture start for first-turn + full tool loop latency; flag for search schemas offered.
         addressed_turn_start = time.time() if is_addressed else None
         search_schemas_offered = bool(native_search_tools)
@@ -409,7 +409,7 @@ async def call_grok_for_groksito(
         MEDIA_ACTION_TOOLS = {"generate_image", "edit_image", "generate_video", "generate_audio", "reply_to_user"}
 
         def _is_direct_delivery_success(result_str: str, tool_name: str) -> bool:
-            """Nested mechanical extraction (Phase 4) of the direct delivery detection.
+            """Extract direct delivery detection from tool results.
 
             Preserves the exact rule that only explicit "delivered directly" success
             phrases from media/reply_to_user tools cause us to set the flag and
@@ -490,7 +490,7 @@ async def call_grok_for_groksito(
                 if call_id is None and isinstance(item, dict):
                     call_id = item.get("call_id") or item.get("id")
 
-                # Simple debug logging for tool selection *decisions by Grok* (ticket #25).
+                # Debug logging for tool selection decisions by the model.
                 # Lightweight + gated by the existing log_tool_selection flag (easy to enable/disable;
                 # default True). Focuses on main decision points the model reaches via native tool calling
                 # (when search chosen, when recent context requested via get_recent_context, respond_directly
@@ -686,7 +686,7 @@ async def call_grok_for_groksito(
                 cache_context=continuation_cache_context,
             )
 
-        # Emit addressed-turn metrics (Ticket #7 Phase 1 instrumentation) only for addressed; lightweight + defensive.
+        # Emit addressed-turn metrics (lightweight, defensive).
         if is_addressed and addressed_turn_start is not None:
             try:
                 latency_ms = (time.time() - addressed_turn_start) * 1000.0

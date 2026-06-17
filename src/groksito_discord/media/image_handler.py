@@ -1,27 +1,7 @@
 """
-Centralized, modern image generation and editing handler for Groksito.
+Image generation and editing (xAI Imagine). Single source of truth for generate_image / edit_image tools.
 
-This module is the single source of truth for:
-- Text-to-Image (via xAI /v1/images/generations + grok-imagine-image)
-- Image editing / transformation (via xAI /v1/images/edits + grok-imagine-image-quality)
-
-Key modernizations:
-- Unified prompt engineering pipeline (always-on enhancer for Spanish + artistic quality + style detection,
-  plus the existing permissive safety net that only activates on real 422/policy errors).
-- Centralized auth resolution, HTTP client, retry, and error handling.
-- First-class support for aspect_ratio and future parameters (passed through cleanly).
-- Robust, silent policy handling: user always sees clean natural feedback ("No se pudo generar la imagen."),
-  original user prompt is *never* modified in delivery UX.
-- Direct delivery via image_delivery for natural typing experience (no duplicate replies).
-- Clear separation: enhancement (quality) vs. softening (only for blocks).
-- Graceful degradation on all errors.
-
-All logic previously scattered in image_generation.py / image_editing.py / media_tools.py
-has been centralized here. The public dispatch functions (_handle_*) keep identical signatures
-so tools.py, llm.py etc. require zero changes.
-
-The system remains fully compatible with the existing "offer heavy tools only on strict creation intent"
-and the DIRECT_DELIVERY_PERFORMED sentinel pattern.
+Uses media/delivery.py for direct delivery (DIRECT_DELIVERY_PERFORMED sentinel). See ARCHITECTURE.md.
 """
 
 from __future__ import annotations
