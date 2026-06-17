@@ -81,7 +81,7 @@ def needs_breadth_grounding(text: str | None) -> bool:
 
     Query-type based (recommendations, alternatives, comparisons, discovery) — not
     topic-specific. Used to tune native search descriptions toward exhaustive synthesis
-    without hardcoding per-domain answers (see ticket #63).
+    without hardcoding per-domain answers.
     """
     if not text or len(text.strip()) < 8:
         return False

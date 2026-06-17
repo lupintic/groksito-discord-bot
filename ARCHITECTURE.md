@@ -2,13 +2,50 @@
 
 **Groksito Discord Bot** — Standalone conversational Discord bot powered directly by Grok (xAI).
 
-This document describes the actual architecture as of the current codebase (June 2026). It is a self-contained bot extracted to run independently. It uses the xAI Responses API (OpenAI-compatible), direct HTTP endpoints for image/video/TTS, and a small set of custom Discord tools.
+This document describes the current layout (June 2026). See [README.md](./README.md) for setup and usage.
 
 ## Core Principles
 
-- **Maximum nativeness**: Minimal custom memory or proactive context injection. Trust Grok's long context, native vision, web_search, x_search, and reasoning. On-demand tools (e.g. `get_recent_context`) only when the model explicitly needs them.
-- **Strict activation & safety**: Guild whitelists, per-user rate limits (enforced before any LLM work), conservative reply-to-other-user policy, and clear separation between conversational owner process and the independent web dashboard.
-- **Decoupled operations**: The Discord bot process and the FastAPI web dashboard are separate runtimes that communicate indirectly via shared `data/` volumes (heartbeats, stats, context snapshots) and the `.env` file.
+- **Maximum nativeness**: Minimal custom memory or proactive context injection. Trust Grok's long context, native vision, `web_search`, `x_search`, and reasoning. On-demand tools (e.g. `get_recent_context`) only when the model explicitly needs them.
+- **Strict activation & safety**: Guild whitelists, per-user rate limits (before any LLM work), conservative reply-to-other-user policy, and a decoupled web dashboard.
+- **Direct delivery**: Media tools send assets to the channel; the LLM path uses a sentinel so exactly one user-visible reply is produced.
+
+## Package Layout
+
+```
+src/groksito_discord/
+├── main.py                 # CLI entry (groksito console script)
+├── discord/
+│   ├── client.py           # Gateway, on_message, slash commands, heartbeats
+│   └── integrations/
+│       ├── steam.py        # Steam Charts / store data for slash commands
+│       └── twitch.py       # Twitch helpers (where used)
+├── core/
+│   ├── conversation.py     # Activation, vision harvest, ref context
+│   ├── intent.py           # Visual/audio keyword signals
+│   ├── grok_oauth.py       # OAuth PKCE + bearer resolution
+│   ├── health.py           # Health snapshots for dashboard
+│   └── safety.py           # Safe reply helpers
+├── llm/
+│   ├── client.py           # Responses API + tool loop
+│   ├── llm_input.py        # Prompt/input assembly
+│   ├── llm_utils.py        # Native search tool builders
+│   ├── tools.py            # Custom tool schemas + dispatch
+│   └── media_tools.py      # Media intent gates + handler exports
+├── media/
+│   ├── image_handler.py    # Text-to-image + image edit
+│   ├── video_handler.py    # Text/image-to-video
+│   ├── audio_handler.py    # TTS
+│   └── delivery.py         # Direct delivery + request tracking
+├── context/                # Short-term channel history + optional summarizer
+├── config/settings.py      # Pydantic settings from .env
+└── utils/                  # env_utils, text, token_usage, emoji_registry, …
+
+web/                        # Independent FastAPI dashboard (port 8010)
+setup.py                    # Interactive .env setup at repo root
+```
+
+**Data compat note:** Short-term context persists to `data/pantsu_context.json`. The filename is legacy from the pre-standalone extraction; it is intentionally unchanged so existing deployments keep working.
 
 ## High-Level Components
 
@@ -16,126 +53,81 @@ This document describes the actual architecture as of the current codebase (June
 Discord (Gateway + REST)
         │
         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Groksito Bot Process (python -m src.groksito_discord)      │
-│  ┌──────────────┐   ┌──────────────────┐   ┌─────────────┐ │
-│  │ client.py    │──▶│ conversation.py  │──▶│ llm/client  │ │
-│  │ (on_message, │   │ (activation,     │   │ (Responses  │ │
-│  │  slashes,    │   │  vision harvest, │   │  + tools)   │ │
-│  │  heartbeats) │   │  ref context)    │   └──────┬──────┘ │
-│  └──────────────┘   └──────────────────┘          │        │
-│                                                    ▼        │
-│  ┌──────────────┐   ┌───────────────────────────────┐      │
-│  │ tools.py     │◀──│ hybrid execution + tiered     │      │
-│  │ (Discord +   │   │ selection (light / minimal)   │      │
-│  │  media)      │   └───────────────────────────────┘      │
-│  └──────────────┘                                          │
-│                                                            │
-│  Steam (integrations/steam.py)  •  Grok OAuth (grok_oauth) │
-└─────────────────────────────────────────────────────────────┘
-        │ (shared volumes: data/, oauth/, .env)
+┌──────────────────────────────────────────────────────────────┐
+│  Groksito Bot (groksito / python -m groksito_discord)         │
+│  discord/client.py ──▶ core/conversation.py ──▶ llm/client.py │
+│         │                      │                      │         │
+│         │                      │                      ▼         │
+│         │                      │              llm/tools.py      │
+│         │                      │              llm/media_tools.py │
+│         ▼                      ▼                      │         │
+│  discord/integrations/steam   context/          media/*_handler │
+│  core/grok_oauth.py                                   delivery  │
+└──────────────────────────────────────────────────────────────┘
+        │ (shared: data/, oauth/, .env)
         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Independent Web Dashboard (web/main.py — FastAPI)          │
-│  • Status / health / guilds                                 │
-│  • Safe .env config editor (backups + protected keys)       │
-│  • Usage / quotas snapshots                                 │
-│  Runs on its own process / container (port 8010)            │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Web Dashboard (web/main.py — FastAPI, own container)       │
+│  Status · safe config editor · usage · guilds                 │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## Detailed Layers
+## Layer Summary
 
-### 1. Discord Client & Activation (`client.py`, `bot.py`)
-- Owns the persistent Gateway connection (the "conversational owner").
-- Guild whitelist enforcement on every message and slash command.
-- Thin `on_message` orchestrator: correlation ID, context update (short-term per-channel), emoji tracking, rate limit check, activation decision delegated to `conversation.py`.
-- Registers slash commands: `/mislimites`, `/stmchr`, `/steamchart`, `/topgames`, `/audio` + context menu for TTS.
-- Background heartbeat task (~35s) writes liveness + guild snapshots so the separate web dashboard can show accurate "Connected" status even across restarts.
-- Lifecycle events (`on_ready`, `on_disconnect`, `on_resumed`) also feed health data.
+### Discord (`discord/client.py`)
+- Owns the persistent Gateway connection.
+- Guild whitelist and per-user rate limiting (6 req / 60s) before LLM work.
+- Slash commands: `/mislimites`, `/stmchr`, `/steamchart`, `/topgames`, `/audio` + TTS context menu.
+- Heartbeats (~35s) for dashboard liveness.
 
-### 2. Conversation & Context (`conversation.py`, `context/`)
-- Strict activation policy (documented in code):
-  - Direct @mention or reply to bot → activate.
-  - Reply to another human → only on strong directed signals (visual intent keywords + `STRONG_DIRECTED_KEYWORDS`).
-- Vision harvesting: attachments, embed images, text-extracted image URLs, recent referent images (fresh only).
-- Referenced message + chain context building for replies.
-- Always updates short-term per-channel history (`data/pantsu_context.json` — legacy filename kept for data compatibility).
-- No automatic long-term memory injection. `get_recent_context` tool (and optional summarizer) is offered on-demand only.
+### Conversation (`core/conversation.py`, `context/`)
+- Activation: @mention or reply-to-bot; reply-to-human only on strong directed signals.
+- Vision: attachments, embeds, text URLs, fresh referent images.
+- Channel history updated every message; no automatic long-term memory injection.
+- `get_recent_context` tool offers on-demand summaries.
 
-### 3. LLM Orchestration & Tool System (`llm/client.py`, `llm_input.py`, `tools.py`, `media_tools.py`)
-- Uses `openai.AsyncOpenAI` against `https://api.x.ai/v1` (Responses API) with the unified bearer from `get_grok_bearer()`.
-- Tiered custom tool selection:
-  - Normal addressed turns: lightweight delivery tools + `get_recent_context` / `respond_directly`.
-  - Continuation rounds: ultra-minimal set (aggressive token saving).
-  - Pure image gen intent: tiny schema.
-- Custom tools include Discord delivery primitives (`reply_to_user`, `react_to_message`, `create_thread`) so the model chooses the presentation style.
-- Media tools (`generate_image`, `edit_image`, `generate_video`, `generate_audio`) call the direct xAI endpoints (Imagine, edits, video polling, TTS) and cooperate with `image_delivery.py` for "direct delivery" (the generated asset is sent to the channel by the tool; the LLM receives only a sentinel and does not emit a duplicate text reply).
-- Native Grok tools (`web_search`, `x_search`) are available via the Responses API when appropriate.
-- Multi-turn tool loop with proper `previous_response_id` continuation, prompt caching, and token usage logging.
+### LLM & Tools (`llm/`)
+- `client.py`: OpenAI-compatible Responses API against `https://api.x.ai/v1`, multi-turn tool loop, `previous_response_id` continuations.
+- Tiered custom tools: ultra-minimal on continuations; heavy media only on explicit visual/audio intent; light decision tools on addressed turns.
+- Native `web_search` / `x_search` offered when query need warrants it.
+- Media tools cooperate with `media/delivery.py` for direct delivery (sentinel pattern).
 
-### 4. Steam Integration (`integrations/steam.py`)
-- Pure data layer: player count fetching (Steam Charts / Steam API), fuzzy name resolution, robust thumbnail URL construction (multiple CDN patterns + store scrape fallback).
-- Used by the three slash commands registered in `client.py`. Embeds are built with game-specific colors and store links.
-- No secrets, no rate-limit coupling with the LLM path.
+### Steam (`discord/integrations/steam.py`)
+- Player counts, fuzzy name resolution, thumbnail URLs. Used by slash commands in `discord/client.py`.
 
-### 5. Authentication (`grok_oauth.py`, config)
-- Three modes (`GROK_AUTH_MODE`): `api_key` (default), `oauth`, `auto`.
-- `get_grok_bearer()` always returns the best available credential (fresh OAuth preferred when present).
-- PKCE loopback flow (`http://127.0.0.1:56121/callback` by default). Token file: `./oauth/xai_oauth_tokens.json` (outside data/, Docker volume mount recommended).
-- Proactive refresh + 401 reactive refresh. Clear handling of `invalid_grant`.
-- Same bearer works for Responses + raw `Authorization: Bearer` on image/video/TTS endpoints.
-- CLI commands fully integrated in `bot.py` (including Docker detection for `--no-browser`).
+### Auth (`core/grok_oauth.py`, `config/settings.py`)
+- Modes: `api_key`, `oauth`, `auto`. Tokens in `./oauth/xai_oauth_tokens.json`.
+- `get_grok_bearer()` unified across Responses + raw media HTTP endpoints.
 
-### 6. Web Dashboard (`web/`)
-- Completely separate FastAPI app (own uvicorn process / container target).
-- Reuses only a tiny safe surface: `env_utils` + read-only health/context snapshots.
-- Routes: dashboard, config (whitelisted safe keys only), stats, usage, guilds, capabilities.
-- Defensive .env writer: full original file preserved, atomic writes, timestamped + rolling backups, critical key recovery on corruption.
-- Status cards reflect bot heartbeats written by the Discord process.
+### Web (`web/`)
+- Separate FastAPI process. Imports `groksito_discord.utils.env_utils` and config only.
+- Safe `.env` editor with backups; never touches secret keys.
 
-### 7. Media Stack (`media/`, `image_delivery.py`, `image_*.py`, `video_generation.py`)
-- Centralized handlers for generation + editing with improved prompt handling and Spanish-friendly behavior.
-- Direct delivery protocol: a request is registered before calling the generator; the delivery module sends the asset publicly and marks a sentinel so the LLM path produces exactly one reply.
-- Audio reuses the same delivery + bubble system for waveform-style voice messages.
+### Media (`media/`)
+- Centralized handlers for image, video, and audio generation.
+- Direct delivery: register request → generate → send attachment → LLM receives sentinel only.
 
-### 8. Configuration & Operations (`config.py`, `health.py`, `env_utils.py`)
-- Pydantic v2 + pydantic-settings. Everything loaded from `.env` (case-insensitive).
-- `validate_for_run()` enforces only the minimal secrets for the chosen auth mode.
-- Health: JSON snapshots for bot status, guilds, usage (video quota tracking in context file for now), and heartbeats.
-- Rich logging with forced colors for Docker/CI. Cyberpunk startup banner (one-time per invocation).
-- Directories (`data/`, `oauth/`) ensured at startup.
+## Typical Turn Flow
 
-### 9. Packaging & Deployment
-- `pyproject.toml` + `setup.py` (entry point `groksito`).
-- Multi-stage Dockerfile: `bot` (full, with ffmpeg) vs `web` (slim, ~280-400MB).
-- `docker-compose.yml`: two services that can run independently. Recommended volumes for persistence.
-- `requirements.txt` (bot + web) and `requirements-web.txt` (dashboard only).
+1. Message → guild + rate limit gates in `discord/client.py`.
+2. Context updated; activation resolved in `core/conversation.py`.
+3. `llm/client.py` builds minimal input + selected tools.
+4. Tool loop until final reply or `respond_directly`.
+5. Media: register → generate → deliver publicly → sentinel suppresses duplicate text.
+6. Heartbeats/stats written for dashboard.
 
-## Data Flow (Typical Turn)
+## Extension Points
 
-1. Message arrives → client enforces guild + rate limit.
-2. Context updated, emojis recorded, activation resolved.
-3. If activated: vision harvest + referenced context prepared.
-4. `llm/client.py` builds Responses input (minimal by default) + selected custom tools.
-5. Model may call decision tools or directly useful tools (including native web/x_search).
-6. Tool results returned; loop continues until `respond_directly` or final message.
-7. For media tools: registration → generation → direct public delivery (sentinel) → LLM gets confirmation only.
-8. Heartbeats and stats snapshots are written continuously for the dashboard.
+- New chat tools → `llm/tools.py` + handler in `media/` or `core/`.
+- New slash command → `register_slash_commands` in `discord/client.py` + data in `discord/integrations/`.
+- Dashboard route → `web/main.py` + template.
 
-## Security Notes
+## Security
 
-- Secrets never in source or images.
-- OAuth tokens protected by dedicated directory + `.gitignore`.
-- Guild whitelist + rate limits are first-class gates.
-- Web config editor never touches secret keys and always backs up before mutation.
-
-## Extension Points (Keep It Small)
-
-- New normal-chat tools → `tools.py` + media or Discord handlers.
-- New slash command → `register_slash_commands` in `client.py` + data logic in `integrations/`.
-- Dashboard pages → add template + route in `web/main.py` (keep it defensive).
+- Secrets and OAuth tokens only via env / `oauth/` (gitignored).
+- Guild whitelist and rate limits are first-class gates.
+- Web config editor whitelists safe keys only.
 
 ---
 
-This is the single source of truth for the current architecture. Update it when real structure or behavior changes.
+Update this file when structure or behavior changes materially.

@@ -75,16 +75,18 @@ cd groksito-discord-bot
 cp .env.example .env
 # Edit .env — at minimum: DISCORD_BOT_TOKEN and XAI_API_KEY (or plan to use --login-oauth)
 
-# 3. (Recommended) Install + validate
-python -m pip install -r requirements.txt
-python -m src.groksito_discord --check
+# 3. (Recommended) Editable install + validate
+python -m pip install -e .
+groksito --check
+# or: python -m groksito_discord --check
 
 # 4. (Optional but powerful) Login with OAuth instead of / in addition to API key
-python -m src.groksito_discord --login-oauth
+groksito --login-oauth
 # or for Docker/VPS: --login-oauth --print-url-only  (then SSH tunnel from laptop)
 
 # 5. Run the bot
-python -m src.groksito_discord
+groksito
+# or: python -m groksito_discord
 ```
 
 Useful CLI flags:
@@ -122,19 +124,23 @@ Example interactions are natural Spanish/English conversation. The bot is intent
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for component breakdown, data flow, the hybrid tool system, media stack, OAuth handling, and extension points.
 
 High-level pieces live under `src/groksito_discord/`:
-- `bot.py` + `client.py` — Discord client, activation, slash commands, heartbeats.
-- `llm.py` + `llm_input.py` — Responses API orchestration, tiered tool selection, multi-turn tool loops.
-- `tools.py` + `media_tools.py` — custom Discord/media tools and light decision tools.
-- `integrations/steam.py` — player count fetching and embed data.
-- `grok_oauth.py` — OAuth PKCE + token management.
-- `web/` — independent FastAPI dashboard (reuses only env_utils + config).
+- `main.py` — CLI entry (`groksito` console script).
+- `discord/client.py` — Gateway connection, slash commands, heartbeats, rate limits.
+- `core/conversation.py` — activation policy, vision harvest, referenced-message context.
+- `llm/client.py` + `llm/llm_input.py` — Responses API orchestration and input building.
+- `llm/tools.py` + `llm/media_tools.py` — tiered custom tools and media intent gates.
+- `media/*_handler.py` + `media/delivery.py` — image/video/audio generation and direct delivery.
+- `discord/integrations/steam.py` — Steam player counts and embed data for slash commands.
+- `core/grok_oauth.py` — OAuth PKCE + token management.
+- `context/` — short-term per-channel history (persisted as `data/pantsu_context.json`; legacy filename, see ARCHITECTURE.md).
+- `web/` — independent FastAPI dashboard (reuses `utils/env_utils` + `config`).
 
 ## 🛠️ Development & Configuration
 
 - All runtime configuration is in `.env` (Pydantic `GroksitoSettings`).
 - Key flags: `GROK_AUTH_MODE`, `ALLOWED_GUILD_IDS`, `ENABLE_VIDEO_GENERATION`, TTS voice/language, etc.
 - The web `/config` page edits only whitelisted safe keys and creates timestamped backups on every save.
-- Add new custom tools by extending the schemas/handlers in `tools.py` and registering them in the tiered selection logic.
+- Add new custom tools by extending the schemas/handlers in `llm/tools.py` and registering them in the tiered selection logic.
 - Tests live in `tests/`. Run with `pytest`.
 
 Never commit `.env` or `oauth/xai_oauth_tokens.json`.

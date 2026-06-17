@@ -5,7 +5,7 @@ Responsibilities:
 - Context classification (casual/minimal/normal/rich/image_gen) via classify (drives tool offering: native web/x only on normal/rich; zero custom on casual/minimal)
 - Minimal context injection: the high-priority referenced [R:...] message for direct replies *to the bot* OR when the bot is directly @mentioned while the user replies to another message (the "describe this YT link my friend posted" case)
 - No automatic per-user memory injection ("let Grok be Grok")
-- No automatic recent conversation summary / raw recent pre-injection (ticket #19): recent context is on-demand via the get_recent_context tool only.
+- No automatic recent-context pre-injection; use the get_recent_context tool on demand.
 - Dynamic context as separate system msg (for prompt caching friendliness)
 - Multimodal vision (input_image high detail)
 
@@ -231,7 +231,7 @@ async def build_responses_input(
         dynamic_context_block = "\n\n".join(context_parts)
 
     # === Recent Conversation Context ===
-    # Pre-injection of summaries removed (ticket #19): recent context is now strictly on-demand.
+    # Recent context is on-demand only (get_recent_context tool).
     # Grok calls the get_recent_context tool (offered via light decision tools on addressed turns)
     # only when it determines the summary is necessary for coherence or referent resolution.
     # No automatic summary or raw recent blocks are injected here. This eliminates the

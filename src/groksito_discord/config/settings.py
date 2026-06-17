@@ -192,12 +192,9 @@ class GroksitoSettings(BaseSettings):
         description="Base directory for short-term conversation context persistence.",
     )
 
-    # Optional explicit override for the short-term context file.
-    # Name "pantsu_context" kept for data-file backward compatibility with pre-standalone deployments (from pantsu-connector extraction).
-    # Users migrating can keep old filename or let default resolve.
     pantsu_context_file: Path | None = Field(
         default=None,
-        description="Optional explicit path for short-term context JSON persistence (pantsu_context.json name for legacy data compat)",
+        description="Optional override for short-term context JSON path (default: data/pantsu_context.json; see ARCHITECTURE.md)",
     )
 
     # -------------------------------------------------------------------------
@@ -249,7 +246,6 @@ class GroksitoSettings(BaseSettings):
         """Path to the short-term conversation context persistence file."""
         if self.pantsu_context_file:
             return self.pantsu_context_file
-        # Default filename kept as "pantsu_context.json" for backward compat with data files from pantsu-connector era.
         return self.data_dir / "pantsu_context.json"
 
     @property
