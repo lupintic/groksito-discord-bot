@@ -339,61 +339,6 @@ def update_from_message(
         save_context()
 
 
-def get_channel_context(
-    channel_id: int,
-    max_lines: int = 8,
-    for_meta_question: bool = False,
-    exclude_current: bool = False,
-) -> str:
-    """
-    Raw recent channel messages (short excerpts only).
-    Used by the get_channel_context custom tool (offered in non-minimal continuation fallback)
-    and for optional proactive summarization.
-    Not used for default prompt injection (only [R:] ref on bot replies in llm_input).
-    """
-    hist = _channel_histories.get(channel_id)
-    if not hist:
-        return ""
-
-    msgs = list(hist)
-    if exclude_current and msgs:
-        msgs = msgs[:-1]
-
-    effective_max = min(max_lines, MAX_RAW_HISTORY)
-    recent = msgs[-effective_max:]
-    lines = []
-    for idx, m in enumerate(recent, 1):
-        author = m.get("author", "???")
-        content = m.get("content", "").strip() or "(no text)"
-
-        # Omit full links and shorten excerpts aggressively for lower token use.
-        prefix = "[G]" if m.get("is_bot") else f"[{author}]"
-
-        # Conservative lengths: 60-100 chars. Never full messages.
-        if for_meta_question:
-            max_content = 100
-            ts_val = m.get("ts")
-            ts_str = ""
-            if isinstance(ts_val, (int, float)):
-                try:
-                    ts_str = datetime.fromtimestamp(ts_val).strftime("%H:%M")
-                except Exception:
-                    ts_str = "??:??"
-            lines.append(f"[{ts_str}] {prefix}: {content[:max_content]}")
-        else:
-            max_content = 90 if max_lines >= 3 else 60
-            lines.append(f"{prefix}: {content[:max_content]}")
-
-    if not lines:
-        return ""
-
-    header = "Channel:\n"
-    if for_meta_question:
-        header = "Channel (meta):\n"
-
-    return header + "\n".join(lines)
-
-
 def get_estimated_history_tokens(channel_id: int) -> int:
     """Rough token estimate of the current channel history (for proactive summarization decisions)."""
     hist = _channel_histories.get(channel_id, [])

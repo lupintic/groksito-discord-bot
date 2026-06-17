@@ -601,7 +601,7 @@ async def call_grok_for_groksito(
                 # Philosophy:
                 # - Rely on previous_response_id: the model retains knowledge of tools that were
                 #   offered in prior turns of the conversation (see similar logic for custom tools
-                #   in get_continuation_tools and aggressive_continuation_tool_minimization).
+                #   in get_continuation_tools).
                 # - Re-sending the native tools (especially with their descriptions) on every cont
                 #   adds unnecessary prompt tokens.
                 # - Custom tools are already aggressively minimized on cont.
