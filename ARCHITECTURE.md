@@ -87,9 +87,13 @@ Discord (Gateway + REST)
 - `get_recent_context` tool offers on-demand summaries.
 
 ### LLM & Tools (`llm/`)
-- `client.py`: OpenAI-compatible Responses API against `https://api.x.ai/v1`, multi-turn tool loop, `previous_response_id` continuations.
+- `prompt_builder.py`: Single source for `SYSTEM_PROMPT` and native search tool descriptions (completeness + nativeness guidance).
+- `llm_input.py`: Sole builder of `initial_input` — light classification for logging/gating, minimal `[R:]`/chain injection on addressed turns, separate system blocks for prompt-cache friendliness.
+- `client.py`: OpenAI-compatible Responses API against `https://api.x.ai/v1`, three-phase orchestration (prep → first turn → tool loop), `previous_response_id` continuations with conservative native-search re-offer.
+- `llm_utils.py`: Native search schema builder (descriptions from `prompt_builder`), token/cache logging, API retry helper.
+- Tool selection and prompt content are intentionally minimal; Grok's native reasoning + `previous_response_id` drive most decisions and continuity.
 - Tiered custom tools: ultra-minimal on continuations; heavy media only on explicit visual/audio intent; light decision tools on addressed turns.
-- Native `web_search` / `x_search` offered when query need warrants it.
+- Native `web_search` / `x_search` offered on normal addressed paths; skipped on casual/minimal/image_gen.
 - Media tools cooperate with `media/delivery.py` for direct delivery (sentinel pattern).
 
 ### Steam (`discord/integrations/steam.py`)
@@ -112,7 +116,7 @@ Discord (Gateway + REST)
 
 1. Message → guild + rate limit gates in `discord/client.py`.
 2. Context updated; activation resolved in `core/conversation.py`.
-3. `llm/client.py` builds minimal input + selected tools.
+3. `llm/llm_input.py` builds minimal input; `llm/client.py` selects tools and orchestrates the Responses API loop.
 4. Tool loop until final reply or `respond_directly`.
 5. Media: register → generate → deliver publicly → sentinel suppresses duplicate text.
 6. Heartbeats/stats written for dashboard.
