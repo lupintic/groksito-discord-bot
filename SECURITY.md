@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-We release patches for security vulnerabilities on the latest `main` branch. The project is at an early version (0.1.0) with active development on main.
+We release patches for security vulnerabilities on the latest `main` branch. The project is at version 0.2.0 with active development on main.
 
 | Version | Supported          |
 | ------- | ------------------ |
 | main    | :white_check_mark: |
-| 0.1.0   | :white_check_mark: |
+| 0.2.0   | :white_check_mark: |
 | < 0.1.0 | :x:                |
 
 ## Reporting a Vulnerability

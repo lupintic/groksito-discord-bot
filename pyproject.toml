@@ -4,14 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "groksito-discord-bot"
-version = "0.1.0"
+version = "0.2.0"
 description = "Standalone Groksito Discord Bot (extracted from pantsu-connector)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Proprietary"}
+license = "MIT"
 authors = [
   {name = "Pantsu Team"}
 ]
+keywords = ["discord", "bot", "grok", "xai", "ai", "llm", "chat"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Communications :: Chat",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Framework :: AsyncIO",
+]
+
 dependencies = [
     "discord.py>=2.7.0,<3.0",  # Targeting recent discord.py for full voice message support + modern features (Components V2, better flags, etc.)
     "httpx>=0.27.0",
@@ -28,6 +41,12 @@ dependencies = [
     "jinja2>=3.1.4",
     "python-multipart",
 ]
+
+[project.urls]
+Homepage = "https://github.com/lupintic/groksito-discord-bot"
+Repository = "https://github.com/lupintic/groksito-discord-bot"
+Issues = "https://github.com/lupintic/groksito-discord-bot/issues"
+Documentation = "https://github.com/lupintic/groksito-discord-bot#readme"
 
 [project.optional-dependencies]
 dev = [
