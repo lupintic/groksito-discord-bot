@@ -514,6 +514,10 @@ def get_emoji_descriptions_for_prompt(
     - The header tells the model to use clean shortcode :name: in its text.
     - A post-send normalizer converts :name: into the proper <:name:ID> form
       so the emoji actually renders when the bot sends the message.
+
+    NOTE: The primary conversational path (llm_input.py) prefers the ultra-stable
+    compact header instead of this full block. This full variant is still correct
+    and useful when richer per-emote meaning is specifically desired.
     """
     _ensure_loaded()
     if max_emotes is None:
@@ -572,10 +576,10 @@ def get_emoji_compact_header(guild_id: int | str | None = None) -> str:
     Tells the model to use clean shortcode :name: (the system upgrades it to the
     full renderable form at send time).
 
-    The main conversational path currently only injects the full list on
-    addressed turns (is_mentioned / reply_to_bot) for exactly this reason.
-    This compact header is available for other use cases (tools, slash commands,
-    or if we ever want weak awareness on passive turns).
+    Used by the main conversational path on addressed turns (via llm_input) for
+    prompt-cache stability and low token overhead. The full ranked list
+    (get_emoji_descriptions_for_prompt) remains for specialized / one-off uses.
+    Compact text is intentionally stable (small alpha sample + fixed phrasing).
     """
     _ensure_loaded()
 

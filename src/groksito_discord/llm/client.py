@@ -79,6 +79,11 @@ logger = logging.getLogger("groksito.llm")
 #   continuations carry text/tool results only (previous_response_id chains state).
 # - DIRECT_DELIVERY short-circuit must happen before sending tool outputs back
 #   (guarantees no duplicate Discord replies via DIRECT_DELIVERY_PERFORMED).
+# - First-turn `input` (via llm_input.build_responses_input) always uses *exactly one*
+#   system message (the fixed SYSTEM_PROMPT) + a single user message. Light context
+#   notes ([R:] refs + compact emoji header) are folded into the user content on
+#   addressed turns. This design maximizes prompt_cache_key prefix hit rate on the
+#   stable prefix while previous_response_id handles multi-round tool state.
 
 MEDIA_ACTION_TOOLS = frozenset({
     "generate_image",

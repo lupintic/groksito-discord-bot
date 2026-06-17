@@ -60,15 +60,17 @@ class TestPromptSingleSourceOfTruth:
         from groksito_discord.llm import prompt_builder
 
         assert hasattr(prompt_builder, "get_native_search_descriptions")
+        # Descriptions are now intentionally stable (single pair) for prompt cache prefix
+        # effectiveness. Both calls return identical comprehensive text.
         web_b, x_b = prompt_builder.get_native_search_descriptions(
             "qué alternativas hay para castear"
         )
         web_n, x_n = prompt_builder.get_native_search_descriptions(
             "cuál es la capital de Francia"
         )
-        assert web_b is not web_n
+        assert web_b == web_n
         assert "multiple focused searches" in web_b
-        assert "multiple focused searches" not in web_n
+        assert "comprehensive" in web_b.lower()
 
 
 class TestNativeSearchBreadthDescriptions:
@@ -92,7 +94,10 @@ class TestNativeSearchBreadthDescriptions:
         )
         web = next(t for t in tools if t["type"] == "web_search")
         assert "1-2" not in web["description"]
-        assert "product/tool options" in web["description"]
+        # After cache stabilization we always emit the comprehensive description
+        # (product/tool options phrase lives in the old STANDARD variant; the stable
+        # version emphasizes comprehensive options + synthesis instead).
+        assert "comprehensive" in web["description"].lower() or "well-known options" in web["description"]
 class TestProactiveSearchGuidance:
     """Additive coverage for the proactive freshness / recency bias (2026-06 feature)."""
 

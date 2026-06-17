@@ -6,7 +6,9 @@ Responsibilities:
 - Minimal context injection: the high-priority referenced [R:...] message for direct replies *to the bot* OR when the bot is directly @mentioned while the user replies to another message (the "describe this YT link my friend posted" case)
 - No automatic per-user memory injection ("let Grok be Grok")
 - No automatic recent-context pre-injection; use the get_recent_context tool on demand.
-- Dynamic context as separate system msg (for prompt caching friendliness)
+- Dynamic context ([R:] + compact emoji header) folded into the *user message* prefix
+  (exactly one system message containing the fixed SYSTEM_PROMPT). This produces a
+  stable identical prefix for xAI prompt_cache_key on every first turn for a user.
 - Multimodal vision (input_image high detail)
 
 The concise SYSTEM_PROMPT from prompt_builder.py is used exclusively.
@@ -162,7 +164,14 @@ def _build_emoji_block_if_addressed(
     is_reply_to_bot: bool,
     is_mentioned: bool,
 ) -> str:
-    """Return server custom emoji descriptions only on addressed turns."""
+    """Return stable compact emoji header only on addressed turns.
+
+    Uses the compact header (not the full ranked list) for prompt cache stability:
+    - Far lower variation (alpha sample + fixed phrasing vs live usage sort + vision desc churn).
+    - Much smaller token cost.
+    - Still tells the model the :shortcode: mechanism and that the system will render.
+    The full descriptions_for_prompt remains available for other call sites if needed.
+    """
     if not (is_reply_to_bot or is_mentioned):
         return ""
 
@@ -176,10 +185,13 @@ def _build_emoji_block_if_addressed(
         except Exception:
             pass
 
-        emoji_full_block = emoji_registry.get_emoji_descriptions_for_prompt(gid, max_emotes=40)
-        if emoji_full_block:
-            logger.debug(f"{cid_prefix()}[CONTEXT] Injected full server custom emoji list (addressed turn)")
-        return emoji_full_block
+        # Compact header chosen for cache efficiency (stable text, low tokens).
+        # Full varying list (by usage + descs) was a major source of divergence
+        # after the SYSTEM_PROMPT prefix on every addressed first turn.
+        emoji_compact_block = emoji_registry.get_emoji_compact_header(gid)
+        if emoji_compact_block:
+            logger.debug(f"{cid_prefix()}[CONTEXT] Injected compact server emoji header (addressed turn)")
+        return emoji_compact_block
     except Exception as emoji_ctx_err:
         logger.debug(f"{cid_prefix()}[Emoji] emoji prompt injection skipped (non-fatal): {emoji_ctx_err}")
         return ""
@@ -267,15 +279,41 @@ async def build_responses_input(
 
     user_content = _build_multimodal_user_content(user_message, image_urls)
 
-    # Separate system messages keep SYSTEM_PROMPT stable for prompt-cache hits;
-    # dynamic [R:]/chain and emoji blocks vary per turn without invalidating the prefix.
+    # Exactly ONE system message: the fixed SYSTEM_PROMPT.
+    # This guarantees an identical leading prefix for every first-turn under the
+    # same per-user prompt_cache_key. Maximizes reuse of the ~2447-char stable block.
+    #
+    # Dynamic [R:]/chain and emoji info (when present on addressed turns) are folded
+    # as a short prefix *inside the user message*. This eliminates variable extra
+    # system messages that previously reduced reliable prefix matching, while still
+    # surfacing the referent and emoji shortcode guidance to the model at the start
+    # of the user turn (where attention is strong).
+    #
+    # Previous design (separate system msgs after the first) was intended to protect
+    # the prefix but in practice the varying message count + varying block content
+    # limited cache effectiveness (observed 5-17% hit rates).
     system_messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
+    # Build tiny optional context note (dynamic ref + compact emoji header).
+    # Both are already gated to addressed turns inside their builders.
+    context_prefix_parts: list[str] = []
     if dynamic_context_block:
-        system_messages.append({"role": "system", "content": dynamic_context_block})
-
+        context_prefix_parts.append(dynamic_context_block)
     if emoji_full_block:
-        system_messages.append({"role": "system", "content": emoji_full_block})
+        context_prefix_parts.append(emoji_full_block)
+    context_note = "\n\n".join(context_prefix_parts).strip()
+
+    # Prepend context note into user_content (str or multimodal list).
+    if context_note:
+        if isinstance(user_content, list):
+            # Multimodal path (vision). Put note as the first text block.
+            if user_content and isinstance(user_content[0], dict) and user_content[0].get("type") == "input_text":
+                orig = user_content[0].get("text") or ""
+                user_content[0]["text"] = f"{context_note}\n\n{orig}".strip()
+            else:
+                user_content = [{"type": "input_text", "text": context_note}] + user_content
+        else:
+            user_content = f"{context_note}\n\n{user_content}".strip() if (user_content or "").strip() else context_note
 
     initial_input: list[dict] = system_messages + [{"role": "user", "content": user_content}]
     stable_prefix_len = len(SYSTEM_PROMPT)
