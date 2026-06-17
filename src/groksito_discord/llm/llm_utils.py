@@ -26,7 +26,7 @@ from openai import (
 )
 
 from ..config import settings
-from .prompt_builder import SUMMARIZATION_PROMPT
+from .prompt_builder import SUMMARIZATION_PROMPT, get_native_search_descriptions
 from ..context import (
     get_estimated_history_tokens,
     get_messages_for_summarization,
@@ -46,7 +46,6 @@ from ..core.intent import (
     _detect_visual_intent,
     _detect_image_creation_intent,
     is_image_edit_request,
-    needs_breadth_grounding,
 )
 
 logger = logging.getLogger("groksito.llm")
@@ -142,34 +141,8 @@ def _build_native_search_tools(
     except Exception:
         pass
 
-    # Concise schemas (prompt-driven #48); descriptions mirror SYSTEM_PROMPT completeness
-    # guidance. Breadth queries get stronger multi-search encouragement (#63).
-    breadth = needs_breadth_grounding(query_text)
-
-    if breadth:
-        web_desc = (
-            "Search the web for comprehensive, up-to-date coverage. For recommendations, "
-            "alternatives, comparisons, or multi-option questions, run multiple focused searches "
-            "(in parallel when helpful) to capture the main well-known options users expect. "
-            "Synthesize into a complete answer — cover key choices with brief context; no raw dumps."
-        )
-        x_desc = (
-            "Search X (Twitter) for posts, trends, and community takes on the topic. "
-            "Useful alongside web_search for recommendations and alternatives. "
-            "Synthesize the most relevant signals; no raw dumps."
-        )
-    else:
-        web_desc = (
-            "Search the web for current facts: news, prices, weather, sports, live data, "
-            "recent events, product/tool options, and recommendations. "
-            "Skip for timeless knowledge you're confident about. "
-            "Use focused queries; synthesize clearly in the final reply (no raw dumps)."
-        )
-        x_desc = (
-            "Search X (Twitter) for posts, trends, and social reactions. "
-            "Use when the user cares about X activity or shared x.com links. "
-            "Synthesize the relevant points in the final reply."
-        )
+    # Concise schemas (prompt-driven #48); descriptions from prompt_builder (single source).
+    web_desc, x_desc = get_native_search_descriptions(query_text)
 
     web_tool: dict = {
         "type": "web_search",
