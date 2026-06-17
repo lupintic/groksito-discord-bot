@@ -91,7 +91,7 @@ ehthumbs.db
 # Documentation and reference material (not required at runtime; keeps image smaller)
 docs/
 *.md
-!README.md               # keep the main one if you really want it (usually still exclude)
+!README.md
 !web/README.md
 !GROK_OAUTH.md
 !ARCHITECTURE.md

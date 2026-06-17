@@ -142,6 +142,7 @@ High-level pieces live under `src/groksito_discord/`:
 - The web `/config` page edits only whitelisted safe keys and creates timestamped backups on every save.
 - Add new custom tools by extending the schemas/handlers in `llm/tools.py` and registering them in the tiered selection logic.
 - Tests live in `tests/`. Run with `pytest`.
+- Full modernization verification: `python scripts/check.py` (pytest + `--check` + `--status`; add `--skip-docker` to skip image builds).
 
 Never commit `.env` or `oauth/xai_oauth_tokens.json`.
 
