@@ -16,7 +16,16 @@ All legacy heavy lists and classify paths cleaned. No large tables here.
 """
 
 from __future__ import annotations
+
+import unicodedata
 from typing import Any
+
+
+def _normalize_query_text(text: str) -> str:
+    """Lowercase + strip accents for accent-insensitive query-shape matching."""
+    t = text.lower().strip()
+    nfkd = unicodedata.normalize("NFKD", t)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
 # =============================================================================
@@ -76,25 +85,30 @@ def needs_breadth_grounding(text: str | None) -> bool:
     """
     if not text or len(text.strip()) < 8:
         return False
-    t = text.lower()
+    t = _normalize_query_text(text)
     patterns = (
-        "alternativa", "alternative", "opciones", "options", "opción", "option",
-        "mejor forma", "best way", "ways to", "formas de", "cómo puedo", "how can i",
-        "qué usar", "what to use", "qué app", "what app", "which app",
-        "recomend", "recommend", "suger", "suggest", "cuál es mejor", "which is better",
+        "alternativa", "alternative", "opciones", "options", "opcion", "option",
+        "mejor forma", "best way", "ways to", "formas de", "como puedo", "how can i",
+        "que usar", "what to use", "que app", "what app", "which app",
+        "recomend", "recommend", "suger", "suggest", "cual es mejor", "which is better",
         "mejor para", "mejor app", "mejor programa", "best for", "best app", "top ", "mejores ", "best ",
         "compar", "compare", " vs ", " versus ", "pros and cons", "ventajas y desventajas",
         "lista de", "list of", "enumera", "listame",
         "apps para", "apps for", "herramientas para", "tools for", "servicios para",
         "software para", "programas para", "aplicaciones para",
-        "cómo hacer", "how to", "cómo ver", "how to watch", "cómo usar", "how to use",
+        "como hacer", "how to", "como ver", "how to watch", "como usar", "how to use",
         "se puede", "is there a way", "hay alguna forma",
+        # Casual discovery / device-use phrasing (query-shape, not topic-specific)
+        "castear", "cast to", "cast ", "casting", "screen mirror", "mirroring", "airplay",
+        "en la tv", "en la tele", "a la tv", "to tv", "on tv", "to the tv", "on the tv",
+        "puedo usar", "can i use", "what can i use", "que puedo usar",
+        "para ver en", "watch on", "stream to", "streaming to",
     )
     if any(p in t for p in patterns):
         return True
     question_shapes = (
-        "qué alternativas", "what alternatives", "cuáles son", "what are the",
-        "hay algún", "is there any", "hay alguna", "is there a",
+        "que alternativas", "what alternatives", "cuales son", "what are the",
+        "hay algun", "is there any", "hay alguna", "is there a",
     )
     return any(t.startswith(s) or f" {s}" in t for s in question_shapes)
 

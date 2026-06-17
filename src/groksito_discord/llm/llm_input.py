@@ -9,7 +9,7 @@ Responsibilities:
 - Dynamic context as separate system msg (for prompt caching friendliness)
 - Multimodal vision (input_image high detail)
 
-The concise SYSTEM_PROMPT from prompt.py is used exclusively.
+The concise SYSTEM_PROMPT from prompt_builder.py is used exclusively.
 This is the single source of truth for building the input sent to the Responses API.
 """
 

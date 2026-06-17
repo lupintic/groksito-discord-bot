@@ -20,6 +20,11 @@ class TestBreadthGroundingDetector:
             "how to watch movies on TV without cable",
             "what are the top options for note taking",
             "apps para castear desde el celular",
+            # Casual discovery phrasing (no topic hardcoding; query-shape only)
+            "como castear stremio a la tv",
+            "cast stremio to tv",
+            "que puedo usar para castear",
+            "stremio en la tele",
         ],
     )
     def test_detects_breadth_queries(self, query):
@@ -48,6 +53,22 @@ class TestSystemPromptCompleteness:
         assert "multiple focused searches" in lowered
         assert "balance extra completeness with accuracy" in lowered
         assert "1-2 key facts" not in lowered
+
+
+class TestPromptSingleSourceOfTruth:
+    def test_native_search_descriptions_imported_from_prompt_builder(self):
+        from groksito_discord.llm import prompt_builder
+
+        assert hasattr(prompt_builder, "get_native_search_descriptions")
+        web_b, x_b = prompt_builder.get_native_search_descriptions(
+            "qué alternativas hay para castear"
+        )
+        web_n, x_n = prompt_builder.get_native_search_descriptions(
+            "cuál es la capital de Francia"
+        )
+        assert web_b is not web_n
+        assert "multiple focused searches" in web_b
+        assert "multiple focused searches" not in web_n
 
 
 class TestNativeSearchBreadthDescriptions:
