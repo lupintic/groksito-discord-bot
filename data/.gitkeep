@@ -1,0 +1,2 @@
+# Ensures data/ exists in fresh clones. Runtime JSON (context, health, Steam cache, etc.)
+# is gitignored — see .gitignore.
