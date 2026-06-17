@@ -35,22 +35,6 @@ services:
       # if you prefer a different location.
       - ./oauth:/app/oauth
 
-      # Optional: Mount the host Docker socket to enable full skill sandbox power tools
-      # (code_execution and playwright_browser). These tools are *only* offered to
-      # approved skills that explicitly declare them in allowed_tools.
-      #
-      # Security note: This gives the container access to the host Docker daemon.
-      # Use only if you trust the skills you approve. On production, consider
-      # network restrictions or a dedicated Docker-in-Docker setup.
-      #
-      # After adding this, rebuild if needed: docker compose up --build
-      # On Linux: ensure the container user can access the socket (docker group or root).
-      # On Docker Desktop (Windows/Mac): the default socket usually works.
-      #
-      # - /var/run/docker.sock:/var/run/docker.sock
-      #
-      # The health check (--status) will report whether Docker is available for sandboxes.
-      # Without the socket, sandboxes gracefully fall back to simulation messages.
     environment:
       - DATA_DIR=/app/data
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -74,7 +58,7 @@ services:
     command: uvicorn web.main:app --host 0.0.0.0 --port 8010
     # The "web" target in the multi-stage Dockerfile produces a much smaller image
     # (~280-400 MB) than the full "bot" target. It only contains the FastAPI
-    # dashboard + the minimal bot modules it imports (env_utils + skill_registry).
+    # dashboard + the minimal bot modules it imports (env_utils + config).
     ports:
       - "8010:8010"
     env_file:

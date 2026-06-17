@@ -211,36 +211,6 @@ class GroksitoSettings(BaseSettings):
         description="Log detailed tool schema selection decisions (turn type, custom tools sent, native flags, schema size). Low overhead.",
     )
 
-    # -------------------------------------------------------------------------
-    # Lightweight Skills + Decision Layer (normal chat only, user approval required)
-    # -------------------------------------------------------------------------
-    enable_skill_decision_layer: bool = Field(
-        default=True,
-        description="Enable the lightweight decision layer that can choose to use approved skills or propose new ones. Does not turn chat into an agent.",
-    )
-    enable_skill_proposals: bool = Field(
-        default=True,
-        description="When recurring patterns are detected, allow the bot to propose creating a new reusable skill (user must approve before activation).",
-    )
-    skill_proposal_min_occurrences: int = Field(
-        default=3,
-        description="Legacy (proposal flow). Min similar requests before considering a proposal (kept for compat).",
-    )
-
-    # Automatic skill creation (new conservative flow: create + immediately approve, no user proposal)
-    enable_skill_auto_creation: bool = Field(
-        default=True,
-        description="When recurring patterns are strongly detected, automatically create and activate the skill (approved=True) without asking. Conservative thresholds apply.",
-    )
-    skill_auto_create_min_occurrences: int = Field(
-        default=3,
-        description="Minimum number of similar requests (same fingerprint) within the time window before auto-creating a skill. Lowered to 3 for more proactive creation on clear recurring data lookups (still gated by  time window + semantic filters).",
-    )
-    skill_auto_create_window_hours: int = Field(
-        default=48,
-        description="Time window in hours for counting recurring requests for auto skill creation (e.g. 3+ times in last 48h for strong patterns like steam player counts).",
-    )
-
     log_cache_metrics: bool = Field(
         default=True,
         description="Log structured prompt caching effectiveness metrics (cached_tokens, hit rate, context like turn_type and query_need). Very low overhead.",

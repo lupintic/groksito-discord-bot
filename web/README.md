@@ -50,7 +50,6 @@ Access at http://localhost:8000
 - Easy to extend: add new routers/ pages under `/templates` and routes in `main.py`.
 
 ## Future ideas
-- Skills management UI
 - Live logs viewer
 - Bot health / restart button (careful)
 - Multi-user auth (overkill for now)

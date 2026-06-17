@@ -153,8 +153,7 @@ class TestContinuationToolMinimization:
 class TestLightDecisionOffer:
     """Light decision tools (core Discord delivery actions + respond/get_recent) on plain addressed normal/minimal.
     Core delivery tools (reply_to_user, react_to_message, create_thread) are offered here to let the model choose
-    *how* to interact (implements #21). Full heavy (create/edit/use) only on offer_decision_tools (strong signals).
-    No bloat on plain addressed without the offer flag.
+    *how* to interact (implements #21). No bloat on plain addressed turns without the offer flag.
     """
 
     def test_light_decision_on_normal_offers_delivery_actions_and_signals(self, patch_video_enabled):
@@ -163,7 +162,6 @@ class TestLightDecisionOffer:
             query_need="normal",
             has_visual_intent=False,
             offer_light_decision_tools=True,
-            offer_decision_tools=False,
         )
         names = _tool_names(tools)
         # Core Discord actions for agency (reply, react, thread) + decision signals
@@ -184,25 +182,6 @@ class TestLightDecisionOffer:
         # 5 delivery/decision + 2 image tools
         assert len(names) <= 7
 
-    def test_full_decision_still_offers_heavy(self, patch_video_enabled):
-        patch_video_enabled(True)
-        tools = get_tools_for_request(
-            query_need="normal",
-            has_visual_intent=False,
-            offer_light_decision_tools=False,
-            offer_decision_tools=True,
-        )
-        names = _tool_names(tools)
-        assert "respond_directly" in names
-        assert "get_recent_context" in names
-        assert "create_skill" in names
-        assert "edit_skill" in names
-        assert "use_skill" in names
-        # Discord delivery actions are also available under full decision offering (#21)
-        assert "reply_to_user" in names
-        assert "react_to_message" in names
-        assert "create_thread" in names
-
     def test_light_on_minimal_addressed_sim(self, patch_video_enabled):
         patch_video_enabled(True)
         tools = get_tools_for_request(
@@ -221,7 +200,6 @@ class TestLightDecisionOffer:
             query_need="normal",
             has_visual_intent=False,
             offer_light_decision_tools=False,
-            offer_decision_tools=False,
         )
         names = _tool_names(tools)
         assert "respond_directly" not in names

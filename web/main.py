@@ -39,7 +39,7 @@ DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR.parent / "data"))
 CONTEXT_FILE = DATA_DIR / "pantsu_context.json"
 ENV_FILE = BASE_DIR.parent / ".env"   # mounted in docker
 
-# Make bot modules importable (web is independent but reuses skill_registry for persistence)
+# Make bot modules importable (web is independent but reuses env_utils + config)
 import sys
 BOT_SRC = BASE_DIR.parent / "src"
 if str(BOT_SRC) not in sys.path:
@@ -58,8 +58,6 @@ from groksito_discord.utils.env_utils import (
     PROTECTED_KEYS,
 )
 
-from groksito_discord.skills.skill_registry import SkillRegistry, Skill
-
 # Ensure templates dir exists (for dev)
 TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -68,7 +66,7 @@ app = FastAPI(title="Groksito Dashboard", description="Independent web config UI
 # Jinja2
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-# Add a simple date filter for timestamps (used in skill views)
+# Add a simple date filter for timestamps
 def _format_timestamp(ts: float | None) -> str:
     if not ts:
         return "—"
@@ -100,8 +98,6 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 EDITABLE_KEYS: dict[str, str] = {
     # Feature flags (bool)
     "enable_video_generation": "bool",
-    "enable_skill_auto_creation": "bool",
-    "enable_skill_decision_layer": "bool",
     "enable_recent_context_summary": "bool",
     "summarization_enabled": "bool",
     "context_smart_mode": "bool",
@@ -114,9 +110,6 @@ EDITABLE_KEYS: dict[str, str] = {
     "recent_context_max_tokens": "int",
     "summarization_threshold_tokens": "int",
     "api_max_retries": "int",
-    "skill_proposal_min_occurrences": "int",
-    "skill_auto_create_min_occurrences": "int",
-    "skill_auto_create_window_hours": "int",
 
     # Strings (safe, non-auth)
     "grok_model": "str",
@@ -130,15 +123,11 @@ EDITABLE_KEYS: dict[str, str] = {
     "api_retry_base_delay_seconds": "float",
     "api_timeout_seconds": "float",
 
-    # Skills (legacy proposal flag is safe to expose)
-    "enable_skill_proposals": "bool",
 }
 
 # Default values for display when not in .env
 DEFAULTS = {
     "enable_video_generation": "true",
-    "enable_skill_auto_creation": "true",
-    "enable_skill_decision_layer": "true",
     "enable_recent_context_summary": "true",
     "context_smart_mode": "true",
     "aggressive_continuation_tool_minimization": "true",
@@ -154,7 +143,6 @@ DEFAULTS = {
     "log_level": "INFO",
     "tts_default_voice": "eve",
     "tts_default_language": "es",
-    "enable_skill_proposals": "true",
 }
 
 # Metadata for UI: display names, subtitles, help, advanced flag
@@ -165,24 +153,6 @@ SETTINGS_METADATA = {
         "subtitle": "T2V + I2V (master switch)",
         "help": "Master switch for the generate_video tool (T2V + I2V).",
         "advanced": False
-    },
-    "enable_skill_auto_creation": {
-        "display_name": "Auto Skill Creation",
-        "subtitle": "Automatically create and approve skills for recurring patterns",
-        "help": "Auto-create and approve skills for strong recurring patterns.",
-        "advanced": False
-    },
-    "enable_skill_decision_layer": {
-        "display_name": "Skill Decision Layer",
-        "subtitle": "Use approved skills automatically in chat",
-        "help": "Let the decision layer use or propose approved skills.",
-        "advanced": False
-    },
-    "enable_skill_proposals": {
-        "display_name": "Skill Proposals (legacy)",
-        "subtitle": "Allow proposing new skills",
-        "help": "Legacy path for proposing new skills (still supported).",
-        "advanced": True
     },
     "enable_recent_context_summary": {
         "display_name": "Recent Context Summaries",
@@ -258,25 +228,6 @@ SETTINGS_METADATA = {
         "help": "Total timeout (seconds) for Grok API calls (Responses + media).",
         "advanced": True
     },
-    "skill_proposal_min_occurrences": {
-        "display_name": "Skill Proposal Min Occur.",
-        "subtitle": "Min requests before legacy proposal",
-        "help": "Min similar requests before considering a skill proposal (legacy).",
-        "advanced": True
-    },
-    "skill_auto_create_min_occurrences": {
-        "display_name": "Auto-Create Min Occur.",
-        "subtitle": "Min occurrences before auto skill",
-        "help": "Min occurrences in window before auto-creating an approved skill.",
-        "advanced": False
-    },
-    "skill_auto_create_window_hours": {
-        "display_name": "Auto-Create Window",
-        "subtitle": "Hours for occurrence counting",
-        "help": "Time window (hours) for counting occurrences for auto skill creation.",
-        "advanced": False
-    },
-
     # Model & Behavior
     "grok_model": {
         "display_name": "Grok Model",
@@ -539,13 +490,6 @@ def get_flash_messages(request: Request) -> list[dict[str, str]]:
     saved = request.query_params.get("saved")
     detail = request.query_params.get("detail", "")
 
-    if success == "approved":
-        msgs.append({"type": "success", "text": "Skill approved successfully."})
-    elif success == "revoked":
-        msgs.append({"type": "success", "text": "Skill disabled (approval revoked)."})
-    elif success == "deleted":
-        msgs.append({"type": "success", "text": "Skill deleted."})
-
     if saved == "whitelist":
         msgs.append({
             "type": "success",
@@ -565,9 +509,7 @@ def get_flash_messages(request: Request) -> list[dict[str, str]]:
     if success == "dedup_noop":
         msgs.append({"type": "success", "text": "No duplicate keys found in .env."})
 
-    if error == "notfound":
-        msgs.append({"type": "error", "text": "Skill not found."})
-    elif error == "save_failed":
+    if error == "save_failed":
         base = "❌ Failed to save configuration."
         if detail:
             base += f" Detail: {detail}"
@@ -780,12 +722,6 @@ def get_capabilities(health: dict[str, Any] | None = None, config_display: dict[
             "badge": "core",
         },
         {
-            "name": "Skills System",
-            "desc": "Lightweight approved instructions + restricted tools for recurring tasks",
-            "status": "active" if flag("enable_skill_decision_layer", True) else "disabled",
-            "badge": "opt-in",
-        },
-        {
             "name": "Recent Context Summarization",
             "desc": "On-demand high-signal summaries of recent channel messages",
             "status": "active" if flag("enable_recent_context_summary", True) else "disabled",
@@ -984,16 +920,13 @@ async def config_page(request: Request):
     # Sections for logical grouping (protected/auth keys are deliberately excluded from the editable form)
     sections = [
         ("Feature Flags", [
-            "enable_video_generation", "enable_skill_auto_creation", "enable_skill_decision_layer",
-            "enable_skill_proposals", "enable_recent_context_summary", "summarization_enabled",
+            "enable_video_generation", "enable_recent_context_summary", "summarization_enabled",
             "context_smart_mode", "aggressive_continuation_tool_minimization",
             "log_tool_selection", "log_cache_metrics",
         ]),
         ("Limits & Thresholds", [
             "recent_context_message_limit", "recent_context_max_tokens", "summarization_threshold_tokens",
             "api_max_retries", "api_retry_base_delay_seconds", "api_timeout_seconds",
-            "skill_proposal_min_occurrences", "skill_auto_create_min_occurrences",
-            "skill_auto_create_window_hours",
         ]),
         ("Model & Behavior", ["grok_model"]),
         ("TTS & Voice", ["tts_default_voice", "tts_default_language"]),
@@ -1104,65 +1037,6 @@ async def usage_page(request: Request):
     """Quotas / usage page."""
     quotas = get_quotas()
     return templates.TemplateResponse(request, "usage.html", {"quotas": quotas, "active": "usage"})
-
-
-# =============================================================================
-# Skills Management (new)
-# =============================================================================
-
-@app.get("/skills", response_class=HTMLResponse)
-async def skills_list(request: Request):
-    """List all skills with approve/disable/delete actions."""
-    reg = SkillRegistry(data_dir=DATA_DIR)  # fresh load each request
-    all_skills: list[Skill] = reg.list_all()
-    # Sort: approved first, then by name
-    all_skills.sort(key=lambda s: (not s.approved, s.name.lower()))
-
-    messages = get_flash_messages(request)
-    return templates.TemplateResponse(
-        request, "skills.html", {"skills": all_skills, "active": "skills", "messages": messages}
-    )
-
-
-@app.get("/skills/{skill_id}", response_class=HTMLResponse)
-async def skill_detail(request: Request, skill_id: str):
-    """Show full details for one skill + actions."""
-    reg = SkillRegistry(data_dir=DATA_DIR)
-    skill = reg.get(skill_id)
-    if not skill:
-        return RedirectResponse("/skills?error=notfound", status_code=303)
-
-    messages = get_flash_messages(request)
-    return templates.TemplateResponse(
-        request, "skill_detail.html", {"skill": skill, "active": "skills", "messages": messages}
-    )
-
-
-@app.post("/skills/{skill_id}/approve")
-async def approve_skill_post(skill_id: str):
-    reg = SkillRegistry(data_dir=DATA_DIR)
-    sk = reg.approve(skill_id, approved_by="web-ui")
-    if sk:
-        return RedirectResponse(f"/skills/{skill_id}?success=approved", status_code=303)
-    return RedirectResponse("/skills?error=approve", status_code=303)
-
-
-@app.post("/skills/{skill_id}/revoke")
-async def revoke_skill_post(skill_id: str):
-    reg = SkillRegistry(data_dir=DATA_DIR)
-    ok = reg.revoke(skill_id)
-    if ok:
-        return RedirectResponse(f"/skills/{skill_id}?success=revoked", status_code=303)
-    return RedirectResponse("/skills?error=revoke", status_code=303)
-
-
-@app.post("/skills/{skill_id}/delete")
-async def delete_skill_post(skill_id: str):
-    reg = SkillRegistry(data_dir=DATA_DIR)
-    ok = reg.delete(skill_id)
-    if ok:
-        return RedirectResponse("/skills?success=deleted", status_code=303)
-    return RedirectResponse("/skills?error=delete", status_code=303)
 
 
 # -----------------------------------------------------------------------------

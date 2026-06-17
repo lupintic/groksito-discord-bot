@@ -78,7 +78,6 @@
             <div class="text-sm space-y-1 font-mono">
                 {% if health %}
                     <div>video: <span class="text-[#67f6ff]">{{ 'enabled' if health.video_generation_enabled else 'disabled' }}</span></div>
-                    <div>docker sandboxes: <span class="text-[#67f6ff]">{{ 'yes' if health.docker_available_for_sandboxes else 'no' }}</span></div>
                     <div>emoji knowledge: <span class="text-white">{{ health.emoji_knowledge_count or 0 }}</span></div>
                 {% else %}
                     <span class="text-[#8a8f98]">no health snapshot yet</span>

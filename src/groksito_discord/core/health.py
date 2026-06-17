@@ -149,7 +149,7 @@ def write_bot_guilds_snapshot(guilds: list | None, *, data_dir: Path | None = No
 def write_bot_health_snapshot(*, data_dir: Path | None = None) -> None:
     """
     Snapshot a slim, web-safe subset of get_health_status() for richer status display.
-    Includes video flag, docker, credential presence (booleans only), etc.
+    Includes video flag, credential presence (booleans only), etc.
     """
     path = _get_data_file(HEALTH_SNAPSHOT_FILENAME, data_dir)
     try:
@@ -159,8 +159,6 @@ def write_bot_health_snapshot(*, data_dir: Path | None = None) -> None:
             "last_seen": time.time(),
             "status": health.get("status"),
             "video_generation_enabled": bool(health.get("video_generation_enabled")),
-            "docker_available_for_sandboxes": bool(health.get("docker_available_for_sandboxes")),
-            "docker_version": health.get("docker_version"),
             "has_discord_token": bool(health.get("has_discord_token")),
             "has_xai_key": bool(health.get("has_xai_key")),
             "grok_auth_mode": health.get("grok_auth_mode"),
@@ -226,26 +224,6 @@ def get_health_status() -> dict[str, Any]:
         status["emoji_knowledge_with_usage"] = 0
         status["emoji_knowledge_guilds"] = 0
 
-    # Best-effort probe for Docker (required for skill power tools: code_execution / playwright_browser sandboxes).
-    # These only activate for approved skills that explicitly list the tools in allowed_tools.
-    # Default docker-compose / Dockerfile do not mount the socket; users must opt-in for full power.
-    # Never blocks or fails health.
-    try:
-        import shutil
-        import subprocess
-        docker_bin = shutil.which("docker")
-        if docker_bin:
-            # Quick version probe (short timeout, swallow output).
-            res = subprocess.run([docker_bin, "--version"], capture_output=True, text=True, timeout=3)
-            status["docker_available_for_sandboxes"] = res.returncode == 0
-            status["docker_version"] = (res.stdout or res.stderr or "").strip()[:80] if res.returncode == 0 else None
-        else:
-            status["docker_available_for_sandboxes"] = False
-            status["docker_version"] = None
-    except Exception:
-        status["docker_available_for_sandboxes"] = False
-        status["docker_version"] = None
-
     # Credential presence (safe — only booleans, helps during live testing setup)
     try:
         from ..config import settings
@@ -286,10 +264,6 @@ def print_health_status() -> None:
     logger.info("=== Groksito Health ===")
     logger.info(f"Overall status: {health['status']}")
     logger.info(f"Video generation: {health.get('video_generation_enabled')}")
-    docker_ok = health.get("docker_available_for_sandboxes")
-    logger.info(f"Docker for skill sandboxes (code_execution/playwright): {'available' if docker_ok else 'NOT available (sandboxes will use simulation fallback)'}")
-    if health.get("docker_version"):
-        logger.info(f"  Docker: {health.get('docker_version')}")
     logger.info(f"Discord token present: {health.get('has_discord_token')}")
     logger.info(f"XAI API key present: {health.get('has_xai_key')}")
     logger.info(f"Grok auth mode: {health.get('grok_auth_mode')} (oauth_strict={health.get('using_oauth')}, prefers_oauth={health.get('auth_prefers_oauth')})")
