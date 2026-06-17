@@ -8,8 +8,8 @@
 # (Discord bot token + xAI/Grok API keys or OAuth tokens).
 #
 # ONLY real secrets, machine-generated caches, logs, and per-run data
-# are ignored. All source code, docs, tests, Dockerfiles, and templates
-# remain committed.
+# are ignored. All source code, tests, Dockerfiles, and templates remain
+# committed. Agent/workflow plans under docs/ are local-only (see below).
 #
 # =============================================================================
 
@@ -109,6 +109,7 @@ scratch*.py
 
 # Tooling / agent scratch directories (Grok Build, implementers, etc.)
 # These often contain plans, summaries, and debug output that should never be committed.
+docs/
 tmp/
 
 # Grok Builds runtime (local tooling only — never commit; do not delete from workspace).
