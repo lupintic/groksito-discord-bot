@@ -8,6 +8,8 @@ Combines:
 
 Used by image_handler, video_handler, audio_handler, and the DIRECT_DELIVERY_PERFORMED
 sentinel pattern in llm/client.py and core/conversation.py.
+
+Pending-request TTL: 90s for images/audio; 360s for video (xAI polling can take up to ~300s).
 """
 
 from __future__ import annotations
@@ -53,7 +55,14 @@ DIRECT_DELIVERY_PERFORMED = object()
 
 _pending_image_requests: dict[str, PendingImageRequest] = {}
 _image_request_lock = asyncio.Lock()
-_IMAGE_REQUEST_TTL = 90  # seconds
+_IMAGE_REQUEST_TTL = 90  # seconds (images / audio)
+_VIDEO_REQUEST_TTL = 360  # seconds — video polling can run up to ~300s
+
+
+def _request_ttl_for_operation(operation_type: str) -> int:
+    if operation_type == "video":
+        return _VIDEO_REQUEST_TTL
+    return _IMAGE_REQUEST_TTL
 
 
 async def register_image_request(
@@ -97,7 +106,7 @@ async def _cleanup_expired_image_requests() -> None:
     now = time.time()
     expired = [
         rid for rid, info in _pending_image_requests.items()
-        if now - info.get("timestamp", 0) > _IMAGE_REQUEST_TTL
+        if now - info.get("timestamp", 0) > _request_ttl_for_operation(info.get("operation_type", ""))
     ]
     for rid in expired:
         _pending_image_requests.pop(rid, None)
@@ -133,12 +142,9 @@ def build_edit_caption() -> str:
     return "Acá tenés la versión editada."
 
 
-def build_video_caption(*, from_image: bool, duration: int, daily_used: int, daily_remaining: int) -> str:
+def build_video_caption(*, from_image: bool, duration: int) -> str:
     mode_label = "a partir de la imagen de referencia" if from_image else "generado"
-    return (
-        f"Acá tenés el video {mode_label}. (480p, {duration}s)\n\n"
-        f"Video {daily_used}/5 del día — te quedan {daily_remaining}."
-    )
+    return f"Acá tenés el video {mode_label}. (480p, {duration}s)"
 
 
 def _guess_filename(url: str, kind: str, index: int = 0) -> str:

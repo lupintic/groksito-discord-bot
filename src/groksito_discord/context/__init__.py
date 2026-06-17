@@ -3,7 +3,7 @@ Context package for Groksito.
 
 Public API is re-exported here from .core (implementation) and .context_summarizer.
 
-Public API re-exported from core.py (state, persistence, quotas).
+Public API re-exported from core.py (state, persistence).
 
 Import-time side effects (context load) still occur on first import of the
 package (via core), but are now contained. Callers using `from . import context`

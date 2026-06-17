@@ -22,8 +22,9 @@ from ..utils.correlation import cid_prefix
 
 from ..config import settings
 from .prompt_builder import SYSTEM_PROMPT
-from ..context import (
+from ..core.intent import (
     is_pure_image_generation_request,
+    is_pure_video_generation_request,
 )
 
 # classify_query_context_need removed in #24 cleanup (heavy tier logic excised).
@@ -37,7 +38,7 @@ def _classify_query_context_need(text: str, is_reply_continuation: bool = False)
     if not t:
         return "minimal"
     try:
-        if is_pure_image_generation_request(t):
+        if is_pure_video_generation_request(t) or is_pure_image_generation_request(t):
             return "image_gen"
     except Exception:
         pass

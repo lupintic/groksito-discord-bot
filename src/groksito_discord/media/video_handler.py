@@ -15,8 +15,8 @@ Key modernizations (following the image pattern):
 - Robust error handling for the longer video generation lifecycle (start + poll).
 - Natural, consistent user-facing messages (matching image delivery style: "Acá tenés...").
 - Direct delivery via image_delivery (register + consume + reply) for natural "typing..." UX.
-- Explicit intent guard preserved (calls back into media_tools.has_explicit_video_intent).
-- Quota enforcement (5/day) kept honest and simple.
+- I2V aspect ratio inferred from the reference image (avoids model guessing 16:9 on portrait/square art).
+- No bot-side daily caps — SuperGrok / xAI subscription limits apply (Grok web parity).
 - Clean separation of concerns.
 
 Canonical video handler; public dispatch functions keep stable signatures.
@@ -44,15 +44,80 @@ try:
 except Exception:
     get_grok_bearer = None  # type: ignore
 
-# Context for video quota (5/day)
-from .. import context
-
 logger = logging.getLogger("groksito.media.video_handler")
 
 
 # =============================================================================
 # Common Helpers
 # =============================================================================
+
+def _sniff_image_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Best-effort width/height from PNG/JPEG/WebP headers (no extra deps)."""
+    if len(data) < 24:
+        return None
+    # PNG: IHDR chunk at bytes 16-23
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        w = int.from_bytes(data[16:20], "big")
+        h = int.from_bytes(data[20:24], "big")
+        if w > 0 and h > 0:
+            return w, h
+    # JPEG: scan for SOF0/SOF2
+    if data[:2] == b"\xff\xd8":
+        i = 2
+        while i < len(data) - 9:
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            if marker in (0xC0, 0xC1, 0xC2, 0xC3):
+                h = int.from_bytes(data[i + 5 : i + 7], "big")
+                w = int.from_bytes(data[i + 7 : i + 9], "big")
+                if w > 0 and h > 0:
+                    return w, h
+            if i + 3 >= len(data):
+                break
+            seg_len = int.from_bytes(data[i + 2 : i + 4], "big")
+            i += 2 + max(seg_len, 2)
+    # WebP (lossy): 'VP8 ' chunk
+    if len(data) >= 30 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+        if data[12:16] == b"VP8 ":
+            w = int.from_bytes(data[26:28], "little") & 0x3FFF
+            h = int.from_bytes(data[28:30], "little") & 0x3FFF
+            if w > 0 and h > 0:
+                return w, h
+    return None
+
+
+def _dimensions_to_aspect_ratio(width: int, height: int) -> str:
+    """Map pixel dimensions to xAI's discrete aspect_ratio labels."""
+    if width <= 0 or height <= 0:
+        return "1:1"
+    ratio = width / height
+    if ratio >= 1.25:
+        return "16:9"
+    if ratio <= 0.8:
+        return "9:16"
+    return "1:1"
+
+
+async def _infer_aspect_ratio_from_image_url(url: str) -> str | None:
+    """Download image header bytes and infer the closest standard aspect ratio."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200 or not resp.content:
+                return None
+            dims = _sniff_image_dimensions(resp.content[:65536])
+            if not dims:
+                return None
+            w, h = dims
+            ar = _dimensions_to_aspect_ratio(w, h)
+            logger.info(f"{cid_prefix()}[Video] Inferred aspect_ratio={ar} from reference image ({w}x{h})")
+            return ar
+    except Exception as e:
+        logger.warning(f"{cid_prefix()}[Video] Could not infer aspect ratio from reference image: {e}")
+        return None
+
 
 def _resolve_api_key() -> str | None:
     """Resolve credential preferring fresh OAuth token."""
@@ -195,9 +260,13 @@ def _generate_video_schema() -> dict:
         "type": "function",
         "name": "generate_video",
         "description": (
-            "Generate a short video clip (grok-imagine-video, auto 480p, max 6s, daily quota of 5 per user). "
-            "Supports text-to-video from a descriptive prompt or image-to-video animation from a reference image. "
-            "Appropriate for explicit user requests to create, generate, make, or animate video content from text or an attached/prior image."
+            "Generate a short video clip (grok-imagine-video, auto 480p, max 6s). "
+            "Supports text-to-video from a descriptive prompt or image-to-video animation from a reference image "
+            "(attached images and images from the referenced/replied message are already available). "
+            "For image-to-video, do NOT set aspect_ratio — the reference image framing is applied automatically. "
+            "Use when the user asks to create, generate, make, or animate video content. "
+            "Do NOT claim a video is ready without calling this tool; successful calls deliver the result "
+            "as a Discord attachment automatically."
         ),
         "parameters": {
             "type": "object",
@@ -213,11 +282,43 @@ def _generate_video_schema() -> dict:
                 },
                 "aspect_ratio": {
                     "type": "string",
-                    "description": "E.g. 16:9, 9:16, 1:1."
+                    "description": "Text-to-video only (16:9, 9:16, 1:1). Omit for image-to-video.",
                 }
             },
             "required": ["prompt"]
         }
+    }
+
+
+def _generate_video_schema_tiny() -> dict:
+    """Minimal schema for native Grok video decisions on addressed turns (mirrors image tiny)."""
+    return {
+        "type": "function",
+        "name": "generate_video",
+        "description": (
+            "Generate a short video (grok-imagine-video, 480p, max 6s). "
+            "Text-to-video or image-to-video when a reference image is in context. "
+            "Omit aspect_ratio for image-to-video. Do NOT say the video is ready without calling this tool."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Scene, action, or animation guidance for the video.",
+                },
+                "duration": {
+                    "type": "integer",
+                    "description": "Seconds (max 6).",
+                    "default": 5,
+                },
+                "aspect_ratio": {
+                    "type": "string",
+                    "description": "Text-to-video only (16:9, 9:16, 1:1). Omit for image-to-video.",
+                },
+            },
+            "required": ["prompt"],
+        },
     }
 
 
@@ -230,8 +331,6 @@ async def _tool_generate_video(
     duration: int = 5,
     aspect_ratio: str | None = None,
     request_id: Optional[str] = None,
-    daily_used: int = 0,
-    daily_remaining: int = 5,
     source_image_url: str | None = None,
     **extra_params: Any,
 ) -> str:
@@ -243,7 +342,6 @@ async def _tool_generate_video(
     - **extra_params passed through (motion_strength, etc.).
     - Improved transient retry + clear error messages.
     - Natural delivery text consistent with the image system ("Acá tenés el video...").
-    - Quota info included on success (preserved).
     """
     api_key = _resolve_api_key()
     if not api_key:
@@ -255,6 +353,25 @@ async def _tool_generate_video(
     # === Modern prompt enhancement (always-on) ===
     enhanced_prompt = _enhance_video_prompt(prompt, is_from_image=is_from_image)
 
+    resolved_aspect_ratio: str | None = aspect_ratio
+    if is_from_image and source_image_url:
+        inferred = await _infer_aspect_ratio_from_image_url(source_image_url)
+        if inferred:
+            if aspect_ratio and aspect_ratio != inferred:
+                logger.info(
+                    f"{cid_prefix()}[Video] Overriding model aspect_ratio={aspect_ratio} "
+                    f"with {inferred} from reference image (prevents stretch)"
+                )
+            resolved_aspect_ratio = inferred
+        else:
+            # Grok web: let the API follow the reference image when we can't sniff dimensions.
+            resolved_aspect_ratio = None
+            if aspect_ratio:
+                logger.info(
+                    f"{cid_prefix()}[Video] Dropping model aspect_ratio={aspect_ratio} for I2V "
+                    "(reference image should drive framing)"
+                )
+
     try:
         video_payload: dict = {
             "model": extra_params.get("model", "grok-imagine-video"),
@@ -262,8 +379,8 @@ async def _tool_generate_video(
             "duration": enforced_duration,
             "resolution": "480p",
         }
-        if aspect_ratio:
-            video_payload["aspect_ratio"] = aspect_ratio
+        if resolved_aspect_ratio:
+            video_payload["aspect_ratio"] = resolved_aspect_ratio
 
         # I2V support
         if source_image_url:
@@ -397,8 +514,6 @@ async def _tool_generate_video(
         caption = build_video_caption(
             from_image=is_from_image,
             duration=enforced_duration,
-            daily_used=daily_used,
-            daily_remaining=daily_remaining,
         )
 
         if request_id and await deliver_from_request(
@@ -425,8 +540,6 @@ async def _handle_generate_video(args: dict, original_message: Any, image_urls: 
     """
     Handles generate_video dispatch.
 
-    - Python-level explicit intent guard (via media_tools.has_explicit_video_intent).
-    - Quota enforcement (5/day per user).
     - Request registration for direct delivery.
     - Calls the modern _tool_generate_video (with prompt enhancement).
     """
@@ -438,12 +551,6 @@ async def _handle_generate_video(args: dict, original_message: Any, image_urls: 
     source_image_url = image_urls[0] if image_urls else None
 
     user_id = getattr(getattr(original_message, "author", None), "id", 0)
-
-    # Quota (optimistic increment, same as before)
-    daily_used, daily_remaining = context.get_video_quota(user_id)
-    if daily_remaining <= 0:
-        return "You have reached the daily limit of 5 videos. Please try again tomorrow."
-    daily_used, daily_remaining = context.increment_video_quota(user_id)
 
     # Register for direct delivery (reuses image_delivery infrastructure)
     request_id = None
@@ -463,8 +570,6 @@ async def _handle_generate_video(args: dict, original_message: Any, image_urls: 
         duration=duration,
         aspect_ratio=aspect_ratio,
         request_id=request_id,
-        daily_used=daily_used,
-        daily_remaining=daily_remaining,
         source_image_url=source_image_url,
         # forward any extra future params the caller might have received
         **{k: v for k, v in args.items() if k not in ("prompt", "duration", "aspect_ratio", "aspect")}

@@ -106,6 +106,7 @@ Discord (Gateway + REST)
 ### Media (`media/`)
 - Centralized handlers for image, video, and audio generation.
 - Direct delivery: register request → generate → send attachment → LLM receives sentinel only.
+- **Video (Grok web parity):** `generate_video` is offered on light-decision addressed turns (like `generate_image`), with quota enforced only by xAI/SuperGrok at the API. I2V reads reference-image dimensions and maps to `16:9` / `9:16` / `1:1` so model-supplied widescreen ratios do not stretch portrait or square art. Video delivery requests use a 360s TTL (vs 90s for images) because generation polling can run ~300s.
 
 ## Typical Turn Flow
 

@@ -32,6 +32,7 @@ ENABLE_VIDEO_GENERATION: bool = settings.enable_video_generation
 # Video — now served from the dedicated modern handler (following the image_handler pattern)
 from ..media.video_handler import (
     _generate_video_schema,
+    _generate_video_schema_tiny,
     _handle_generate_video,
 )
 
@@ -58,8 +59,12 @@ from ..media.image_handler import _enhance_prompt_for_api, soften_image_prompt
 
 def has_explicit_video_intent(text: str | None) -> bool:
     """
-    Detects clear, explicit user intent to generate a video.
-    Used as a hard safety gate to prevent generate_video on generic image questions.
+    Detects clear user intent to generate a video.
+
+    Used for logging, continuation carryover, and ultra-light pure_video_gen routing —
+    NOT as the sole gate for offering generate_video on addressed turns (that follows
+    the same native pattern as generate_image: offered on light decision tools;
+    xAI / SuperGrok subscription limits apply at the API).
     """
     if not text:
         return False
@@ -67,16 +72,18 @@ def has_explicit_video_intent(text: str | None) -> bool:
 
     video_keywords = [
         "haz un video", "hacé un video", "hace un video",
-        "genera un video", "generame un video", "generá un video",
-        "crea un video", "creame un video", "creá un video",
+        "genera un video", "generar un video", "generarme un video",
+        "generame un video", "generá un video", "generáme un video",
+        "crea un video", "crear un video", "crearme un video",
+        "creame un video", "creá un video",
         "hazme un video", "haceme un video",
         "quiero un video", "necesito un video",
-        "haz video", "genera video", "crea video",
+        "haz video", "genera video", "generar video", "crea video", "crear video",
         "generame video", "creame video",
-        "video de esta", "video de la", "video de esto", "video de eso",
-        "video de la imagen", "video de la foto",
+        "video de esta", "video de la", "video de esto", "video de eso", "video de esa",
+        "video de la imagen", "video de la foto", "video de esa imagen",
         "un video de", "un video con esta", "una video de", "una video con",
-        "anima esta", "anima la", "anima esto",
+        "anima esta", "anima la", "anima esto", "anima esa",
         "convierte esta en video", "convierte la en video", "convierte en video",
         "make a video", "generate a video", "create a video",
         "animate this", "turn this into a video",
@@ -96,7 +103,12 @@ def has_explicit_video_intent(text: str | None) -> bool:
     # Robust fallback for typos / grammar slips ("una video", "generame una video", "genera video de una...")
     # Common when users type fast in Spanish.
     if "video" in t:
-        gen_hints = ("genera", "crea", "haz", "generame", "creame", "hazme", "quiero un", "necesito un", "make a", "generate a", "create a")
+        gen_hints = (
+            "genera", "generar", "crea", "crear", "haz", "generame", "generarme",
+            "creame", "crearme", "hazme", "quiero un", "necesito un", "podrias generar",
+            "podrías generar", "puedes generar", "me podrias", "me podrías",
+            "make a", "generate a", "create a",
+        )
         if any(g in t for g in gen_hints):
             # Avoid turning analysis, search, or watch requests into video intent
             bad = ("qué ves", "que ves", "analiza", "describe", "qué es el video", "busca video", "quiero ver", "ver un video", "ver videos")

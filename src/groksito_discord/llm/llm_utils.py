@@ -46,6 +46,7 @@ from ..core.intent import (
     _detect_visual_intent,
     _detect_image_creation_intent,
     is_image_edit_request,
+    is_pure_video_generation_request,
 )
 
 logger = logging.getLogger("groksito.llm")
