@@ -163,10 +163,16 @@ MIT License — see [LICENSE](./LICENSE).
 
 Contributions, bug reports, and feature ideas are welcome.
 
+See the full [CONTRIBUTING.md](./CONTRIBUTING.md) guide (development setup, philosophy, process, what not to do).
+
+We also maintain a [Code of Conduct](./CODE_OF_CONDUCT.md) and [Security Policy](./SECURITY.md).
+
+Quick summary:
 1. Fork the repo
 2. Create a feature branch
-3. Make your changes + add tests when reasonable
-4. Open a Pull Request
+3. Make focused changes + add tests when reasonable
+4. Run verification (`python scripts/check.py --skip-docker`)
+5. Open a Pull Request (use the template)
 
 Keep changes focused and respect the "maximum nativeness" philosophy.
 
