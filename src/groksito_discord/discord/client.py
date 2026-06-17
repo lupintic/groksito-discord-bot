@@ -720,7 +720,7 @@ def register_slash_commands(
 
 
 # =============================================================================
-# Steam integration moved to src/groksito_discord/integrations/steam.py (Phase 1)
+# Steam integration lives in src/groksito_discord/discord/integrations/steam.py
 # All Steam player count fetching, scraping, game resolution, and data structures
 # were extracted here. The two slash commands (registered above) delegate to it.
 # No behavior was changed.

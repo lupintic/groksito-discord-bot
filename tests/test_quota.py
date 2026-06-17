@@ -1,7 +1,7 @@
 """
 Tests for the simple per-user daily video quota (5/day).
 
-Implemented in context.py and used by video_generation.py + _handle_generate_video.
+Implemented in context.py and used by media/video_handler.py (_handle_generate_video).
 The claim "5 videos por día" in the schema must be honest — these tests protect that.
 """
 

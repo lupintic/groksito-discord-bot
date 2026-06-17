@@ -831,7 +831,7 @@ async def _handle_edit_image(args: dict, original_message: Any, image_urls: list
     )
 
 
-# Convenience re-exports for media_tools.py (keeps old import paths working)
+# Public handler symbols (imported by llm/media_tools.py)
 __all__ = [
     "_handle_generate_image",
     "_handle_edit_image",
