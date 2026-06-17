@@ -15,6 +15,7 @@ The bot is designed around "maximum nativeness": minimal custom memory or contex
   - Activates on direct mentions, replies to the bot, or strong directed signals in reply chains.
   - Native vision: processes images from attachments, embeds, and recent referenced messages/URLs.
   - On-demand recent conversation summaries via tool (no automatic heavy context stuffing).
+  - Prompt construction optimized for cache efficiency: stable `SYSTEM_PROMPT` prefix + minimal gated dynamic context only on addressed turns.
 
 - **Direct Media Generation (Grok-native)**
   - Image generation (`generate_image`) with Grok Imagine — supports stylized and suggestive content per Grok's model policy.
@@ -127,7 +128,7 @@ High-level pieces live under `src/groksito_discord/`:
 - `main.py` — CLI entry (`groksito` console script).
 - `discord/client.py` — Gateway connection, slash commands, heartbeats, rate limits.
 - `core/conversation.py` — activation policy, vision harvest, referenced-message context.
-- `llm/client.py` + `llm/llm_input.py` — Responses API orchestration and input building.
+- `llm/client.py` + `llm/llm_input.py` — Responses API orchestration and input building. `llm_input.py` is the single source of truth: always one stable `SYSTEM_PROMPT` system message; dynamic referent/emoji context (when present) is folded into the user message for prompt cache efficiency.
 - `llm/tools.py` + `llm/media_tools.py` — tiered custom tools and media intent gates.
 - `media/*_handler.py` + `media/delivery.py` — image/video/audio generation and direct delivery.
 - `discord/integrations/steam.py` — Steam player counts and embed data for slash commands.

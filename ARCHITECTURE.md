@@ -2,11 +2,11 @@
 
 **Groksito Discord Bot** — Standalone conversational Discord bot powered directly by Grok (xAI).
 
-This document describes the current layout (June 2026). See [README.md](./README.md) for setup and usage.
+This document describes the current layout (June 2026, post prompt-caching efficiency updates). See [README.md](./README.md) for setup and usage.
 
 ## Core Principles
 
-- **Maximum nativeness**: Minimal custom memory or proactive context injection. Trust Grok's long context, native vision, `web_search`, `x_search`, and reasoning. On-demand tools (e.g. `get_recent_context`) only when the model explicitly needs them.
+- **Maximum nativeness**: Minimal custom memory or proactive context injection. Trust Grok's long context, native vision, `web_search`, `x_search`, and reasoning. On-demand tools (e.g. `get_recent_context`) only when the model explicitly needs them. Prompt construction is deliberately lightweight and cache-friendly (stable prefix + gated dynamic notes only when addressed).
 - **Strict activation & safety**: Guild whitelists, per-user rate limits (before any LLM work), conservative reply-to-other-user policy, and a decoupled web dashboard.
 - **Direct delivery**: Media tools send assets to the channel; the LLM path uses a sentinel so exactly one user-visible reply is produced.
 
@@ -87,13 +87,14 @@ Discord (Gateway + REST)
 - `get_recent_context` tool offers on-demand summaries.
 
 ### LLM & Tools (`llm/`)
-- `prompt_builder.py`: Single source for `SYSTEM_PROMPT` and native search tool descriptions (completeness + nativeness guidance).
-- `llm_input.py`: Sole builder of `initial_input` — exactly one stable system message (SYSTEM_PROMPT) + single user message. Light `[R:]` + compact emoji notes folded into user content on addressed turns (maximizes prompt_cache_key prefix stability for the fixed SYSTEM_PROMPT).
-- `client.py`: OpenAI-compatible Responses API against `https://api.x.ai/v1`, three-phase orchestration (prep → first turn → tool loop), `previous_response_id` continuations with conservative native-search re-offer.
-- `llm_utils.py`: Native search schema builder (descriptions from `prompt_builder`), token/cache logging, API retry helper.
+- `prompt_builder.py`: Single source for `SYSTEM_PROMPT` (ultra-minimal, ~2447 chars) and native search tool descriptions (completeness + nativeness guidance). Search descriptions are intentionally stable across turns.
+- `llm_input.py`: Sole authoritative builder of `initial_input` for the Responses API. Always exactly **one** system message containing the fixed `SYSTEM_PROMPT`. All dynamic context on addressed turns — high-priority `[R:]` referenced message + reply-chain ancestors, plus a compact server emoji header — is folded as a short prefix at the start of the user message. This design guarantees a consistent prefix under the per-user `prompt_cache_key`, maximizing KV cache hits on the stable `SYSTEM_PROMPT` block while keeping the information visible to the model.
+- `client.py`: OpenAI-compatible Responses API against `https://api.x.ai/v1`, three-phase orchestration (prep → first turn → tool loop), heavy use of `previous_response_id` for continuations (custom tools minimized on follow-ups; vision only on first turn of a logical user message).
+- `llm_utils.py`: Native search schema builder (descriptions from `prompt_builder`), per-user `prompt_cache_key` helper, structured token + cache metrics logging (`cached_tokens`, hit rate), API retry helper.
+- Prompt construction prioritizes cache efficiency and Maximum Nativeness: no automatic long-term memory or channel history pre-injection (recent context only via the `get_recent_context` tool when the model asks). All addressed turns receive minimal gated referent data.
 - Tool selection and prompt content are intentionally minimal; Grok's native reasoning + `previous_response_id` drive most decisions and continuity.
-- Tiered custom tools: ultra-minimal on continuations; heavy media only on explicit visual/audio intent; light decision tools on addressed turns.
-- Native `web_search` / `x_search` offered on normal addressed paths; skipped on casual/minimal/image_gen.
+- Tiered custom tools: ultra-minimal on continuations; heavy media only on explicit visual/audio intent; light decision tools (including `get_recent_context` + `respond_directly`) on addressed turns.
+- Native `web_search` / `x_search` offered on normal addressed paths (with stable descriptions); skipped on casual/minimal/image_gen.
 - Media tools cooperate with `media/delivery.py` for direct delivery (sentinel pattern).
 
 ### Steam (`discord/integrations/steam.py`)
@@ -116,7 +117,7 @@ Discord (Gateway + REST)
 
 1. Message → guild + rate limit gates in `discord/client.py`.
 2. Context updated; activation resolved in `core/conversation.py`.
-3. `llm/llm_input.py` builds minimal input; `llm/client.py` selects tools and orchestrates the Responses API loop.
+3. `llm/llm_input.py` (single source) builds input with exactly one system message + optional light context folded into the user turn; `llm/client.py` selects tools and orchestrates the Responses API loop (using `previous_response_id` for multi-turn state).
 4. Tool loop until final reply or `respond_directly`.
 5. Media: register → generate → deliver publicly → sentinel suppresses duplicate text.
 6. Heartbeats/stats written for dashboard.
