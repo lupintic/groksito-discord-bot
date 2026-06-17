@@ -4,7 +4,7 @@ Tests for tightened error observability (issue #61).
 Covers:
 - utils/errors.py helpers
 - Vision 404 retry path in the LLM client
-- Bad skill data handling
+- Tool error formatting edge cases
 - env_utils parse failure logging
 """
 
@@ -126,11 +126,6 @@ async def test_vision_404_retry_succeeds_without_images(monkeypatch):
         "groksito_discord.llm.client._get_grok_bearer",
         lambda: "fake-test-bearer",
     )
-    monkeypatch.setattr(
-        "groksito_discord.skills.decision.make_decision",
-        AsyncMock(return_value=None),
-    )
-
     success_response = MagicMock()
     success_response.output_text = "Es un meme gracioso."
     success_response.output = []
@@ -160,30 +155,6 @@ async def test_vision_404_retry_succeeds_without_images(monkeypatch):
 
     assert result == "Es un meme gracioso."
     assert call_count == 2
-
-
-def test_prepare_skill_injection_bad_skill_id_returns_none(monkeypatch, tmp_path, caplog):
-    caplog.set_level(logging.DEBUG)
-
-    from groksito_discord.skills.skill_executor import prepare_skill_injection
-    from groksito_discord.skills.skill_registry import SkillRegistry
-
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    reg = SkillRegistry(data_dir=data_dir)
-    getter = lambda: reg
-    monkeypatch.setattr(
-        "groksito_discord.skills.skill_registry.get_skill_registry",
-        getter,
-    )
-    monkeypatch.setattr(
-        "groksito_discord.skills.skill_executor.get_skill_registry",
-        getter,
-    )
-
-    result = prepare_skill_injection(decision_skill_id="does-not-exist-xyz")
-    assert result is None
-    assert any("does not exist" in r.message for r in caplog.records)
 
 
 def test_normalize_bot_emoji_output_upgrades_shortcode(monkeypatch, tmp_path):

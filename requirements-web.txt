@@ -10,8 +10,7 @@
 # - Jinja2 for templates
 # - python-multipart for form handling (config editor)
 # - pydantic + pydantic-settings (because it imports groksito_discord.config
-#   and groksito_discord.skills.skill_registry for the safe .env writer and
-#   the skills approve/revoke UI)
+#   and groksito_discord.config for the safe .env writer)
 #
 # It deliberately does NOT pull in discord.py, the LLM clients, media libs,
 # rich, structlog, etc. Those stay only in the bot stage.
@@ -24,7 +23,6 @@ python-multipart
 
 # Required because web/main.py does:
 #   from groksito_discord.env_utils ...
-#   from groksito_discord.skills.skill_registry import ...
-# and skill_registry does "from ..config import settings"
+# and env_utils/config helpers pull from groksito_discord.config
 pydantic>=2.11.7
 pydantic-settings>=2.4.0

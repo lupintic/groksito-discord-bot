@@ -53,7 +53,6 @@ from .llm_utils import (
     _call_responses_with_retry,
 )
 
-# Lightweight Skills + Decision layer (normal chat). Lazy imports inside functions to avoid cycles.
 try:
     from ..config import settings as _settings
 except Exception:
@@ -174,50 +173,6 @@ async def call_grok_for_groksito(
 
         is_addressed = bool(is_mentioned or is_reply_to_bot)
 
-        # =====================================================================
-        # LIGHTWEIGHT SKILLS + DECISION LAYER (normal chat only)
-        # Runs a tiny cache-friendly decision call, then optionally injects an
-        # approved skill's instructions + restricts tool offering.
-        # Never turns normal chat into an autonomous agent. User approval required.
-        # =====================================================================
-        decision = None
-        skill_injection = None
-        post_tool_skill_injection = None  # set when use_skill tool is successfully called mid-flow
-
-        try:
-            enable_layer = bool(getattr(_settings, "enable_skill_decision_layer", True)) if _settings else True
-            if enable_layer and need in ("normal", "rich"):
-                from ..skills.decision import make_decision as _make_decision
-                from ..skills.skill_executor import prepare_skill_injection as _prepare_injection
-                from ..skills.skill_registry import get_skill_registry as _get_reg
-
-                reg = _get_reg()
-                approved_names = [s.name for s in reg.list_approved()]
-
-                decision = await _make_decision(
-                    user_message=user_message_text,
-                    author_name=author_name,
-                    is_mentioned=is_mentioned,
-                    is_reply_to_bot=is_reply_to_bot,
-                    recent_signals=None,
-                    approved_skill_names=approved_names,
-                    context_need=need,   # pass classify result so heuristic/prompt can be smarter
-                )
-
-                # Apply skill if the decision selected an approved one
-                if decision and decision.action.value == "use_skill" and decision.use_skill:
-                    skill_injection = _prepare_injection(
-                        decision_skill_id=decision.use_skill,
-                        user_message=user_message_text,
-                    )
-                    if skill_injection:
-                        # Mutate the input we are about to send (high-priority skill instructions)
-                        from ..skills.skill_executor import inject_skill_into_responses_input as _inject
-                        initial_input = _inject(initial_input, skill_injection)
-                        logger.info(f"{cid_p}[SKILLS] Skill '{skill_injection.skill.name}' injected into prompt")
-        except Exception as dec_err:
-            logger.warning(f"{cid_p}[SKILLS] Decision layer skipped (non-fatal, degraded): {dec_err}")
-
         # === Smart Tool Selection + Native Tools ===
         # has_visual_intent from upstream is now STRICT image *creation/edit* intent (not just "image present").
         # We keep a separate broader signal only for enabling image_understanding / image_search flags on native web_search.
@@ -249,43 +204,6 @@ async def call_grok_for_groksito(
         if has_x_link_intent:
             logger.info(f"{cid_p}[LLM] X/Link intent detected in reply ΓÇö boosting context awareness for referenced links")
 
-        # === Internal decision tools via native tool calling (unified reasoning path) ===
-        # We offer a small set of internal decision/action tools (get_recent_context, use_skill,
-        # create_skill, edit_skill, respond_directly) only on relevant turns. This lets the *model* reason
-        # about whether to fetch recent context (on-demand), activate an existing skill, create a new one,
-        # edit an existing one, or answer directly ΓÇö replacing much of the previous hardcoded decision/prompt logic.
-        # The offer is gated by a cheap pre-filter so we stay token-efficient and don't turn
-        # normal chat into an agent loop. (Recent context pre-injection removed in #19.)
-        offer_decision_tools = False
-        try:
-            is_addressed = bool(is_mentioned or is_reply_to_bot)
-            tlow = (user_message_text or user_message or "").lower()
-
-            # Reuse/extend the cheap creation intent + pattern detector
-            from ..skills.skill_proposer import should_offer_create_skill_tool, _has_explicit_edit_intent
-            creation_candidate = should_offer_create_skill_tool(
-                user_message_text or user_message,
-                channel_id=channel_id,
-                user_id=int(user_id) if (user_id and str(user_id).isdigit()) else 0,
-            )
-
-            edit_candidate = _has_explicit_edit_intent(user_message_text or user_message or "")
-
-            # Other signals that make decision tools worth offering (addressed + needs context/data/skill lang)
-            has_context_signal = any(k in tlow for k in ("antes", "dijimos", "habl├íbamos", "qu├⌐ pas├│", "contin├║a", "de qu├⌐", "resumen de la", "la charla", "tema anterior", "what did we", "earlier", "previous", "contexto"))
-            has_data_or_skill_signal = any(k in tlow for k in ("hoy", "ahora", "actual", "en vivo", "live", "pico", "jugadores", "precio", "cu├íntos", "crea", "create", "skill", "habilidad", "haz una", "quiero una", "mejora", "edita", "actualiza"))
-
-            # Offer the heavy decision meta tools (create/edit/use_skill, get_recent_context, respond_directly)
-            # ONLY on explicit signals or strong candidates. Bare "is_addressed" (plain @mention) is
-            # NOT enough ΓÇö it would bloat every normal question with 15k+ chars of meta schemas
-            # (create_skill descriptions etc.) even when no skill management is relevant.
-            # Recent context is available on-demand via the get_recent_context tool (offered on
-            # addressed turns via light decision tools or full); no pre-injection (see #19).
-            if creation_candidate or edit_candidate or has_context_signal or has_data_or_skill_signal:
-                offer_decision_tools = True
-        except Exception:
-            offer_decision_tools = False
-
         offer_light_decision_tools = False
         try:
             if should_offer_light_decision_tools(
@@ -293,7 +211,7 @@ async def call_grok_for_groksito(
                 is_mentioned=is_mentioned,
                 is_reply_to_bot=is_reply_to_bot,
                 context_need=need,
-            ) and not offer_decision_tools:
+            ):
                 offer_light_decision_tools = True
         except Exception:
             offer_light_decision_tools = False
@@ -305,23 +223,8 @@ async def call_grok_for_groksito(
             has_explicit_audio_intent=explicit_audio_intent,
             is_tool_continuation=False,
             pure_image_gen=pure_image_gen_intent,
-            offer_create_skill_tool=offer_decision_tools,  # create_skill is included in the decision tool set
-            offer_decision_tools=offer_decision_tools,
             offer_light_decision_tools=offer_light_decision_tools,
         )
-
-        # When a skill is (or will be) active and declares custom tools such as code_execution
-        # or playwright_browser, inject their full schemas into the list offered to the model.
-        # This is how skills get access to powerful/specialized tools without polluting normal chat turns.
-        # The subsequent skill filter will keep only the ones the skill explicitly allows.
-        if skill_injection and getattr(skill_injection, "allowed_custom", None):
-            try:
-                from .tools import get_skill_specific_custom_schemas, augment_custom_tools_with_skill_customs
-                custom_tools = augment_custom_tools_with_skill_customs(
-                    custom_tools, skill_injection.allowed_custom
-                )
-            except Exception:
-                pass
 
         # === Native search tool offering (first-turn) ===
         # For first-turn messages where need in ("normal", "rich"), we *consider* native search tools.
@@ -357,18 +260,7 @@ async def call_grok_for_groksito(
                 has_attached_images=bool(image_urls),
             )
 
-        # === Apply skill restrictions to tool offering (if a skill is active) ===
-        try:
-            from ..skills.skill_executor import (
-                filter_native_search_tools as _filter_native,
-                filter_custom_tools as _filter_custom,
-            )
-            if skill_injection:
-                native_search_tools = _filter_native(native_search_tools, skill_injection)
-                custom_tools = _filter_custom(custom_tools, skill_injection)
-                logger.debug(f"{cid_p}[SKILLS] Tools restricted to skill allowances (native={len(native_search_tools)}, custom={len(custom_tools)})")
-        except Exception:
-            pass
+
 
         # (Recent context force logic removed in #19: summaries are generated exclusively on-demand
         # inside the get_recent_context tool handler when the model explicitly calls it. No
@@ -602,7 +494,7 @@ async def call_grok_for_groksito(
                 # Lightweight + gated by the existing log_tool_selection flag (easy to enable/disable;
                 # default True). Focuses on main decision points the model reaches via native tool calling
                 # (when search chosen, when recent context requested via get_recent_context, respond_directly
-                # vs tools, skill activation, etc.). Particularly useful on normal @mentions where the
+                # vs tools, etc.). Particularly useful on normal @mentions where the
                 # light decision tool pair (respond_directly + get_recent_context) is offered to let the
                 # model decide. Non-intrusive, best-effort, no sensitive values logged, trivial to remove.
                 # Uses tools_logger to match other structured tool/decision logs (log_tool_selection etc).
@@ -615,9 +507,6 @@ async def call_grok_for_groksito(
                             "x_search",
                             "get_recent_context",
                             "respond_directly",
-                            "use_skill",
-                            "create_skill",
-                            "edit_skill",
                         }
                         if name in DECISION_TOOL_NAMES:
                             _arg_keys = (
@@ -665,22 +554,6 @@ async def call_grok_for_groksito(
                     logger.error(f"{cid_p}[TOOLS] {result}", exc_info=True)
 
                 result_str = str(result)
-
-                # Post-tool use_skill activation: prepare injection so we can filter tools
-                # on the next continuation round (strong enforcement of allowed tools + the
-                # instructions block is already in the tool result the model will see).
-                if name == "use_skill" and "__USE_SKILL_ACTIVATED__:" in result_str:
-                    try:
-                        skill_id = result_str.split("__USE_SKILL_ACTIVATED__:")[1].split("\n", 1)[0].strip()
-                        from ..skills.skill_executor import prepare_skill_injection as _prep_inj
-                        post_tool_skill_injection = _prep_inj(
-                            decision_skill_id=skill_id,
-                            user_message=user_message_text,
-                        )
-                        if post_tool_skill_injection:
-                            logger.info(f"{cid_p}[SKILLS] use_skill tool activated post-injection for {skill_id}")
-                    except Exception as inj_err:
-                        logger.debug(f"{cid_p}[SKILLS] Could not prepare post use_skill injection: {inj_err}")
                 logger.info(f"{cid_p}[LLM] Round {round_num}: tool '{name}' completed, result length={len(result_str)}")
 
                 if name in MEDIA_ACTION_TOOLS:
@@ -718,9 +591,7 @@ async def call_grok_for_groksito(
                     has_explicit_video_intent=explicit_video_intent,
                     has_explicit_audio_intent=explicit_audio_intent,
                     is_tool_continuation=True,
-                    pure_image_gen=pure_image_gen_intent,  # ignored inside when is_tool_continuation, but harmless
-                    offer_create_skill_tool=False,  # never offer creation/decision tools on continuations
-                    offer_decision_tools=False,
+                    pure_image_gen=pure_image_gen_intent,
                 )
 
                 # === Native search tools on continuation ===
@@ -754,29 +625,6 @@ async def call_grok_for_groksito(
                         if itype_str and ("web_search" in itype_str or "x_search" in itype_str or "search_call" in itype_str):
                             continuation_native_search_tools = native_search_tools
                             break
-                except Exception:
-                    pass
-
-                # Apply post-tool use_skill (or pre-decided) injection filters on continuation tools.
-                # This restricts what the model can call in the round where it will produce the
-                # final answer after activating a skill via tool. Combined with the strong
-                # [SKILL ACTIVE] block in the tool result, this makes the model follow the skill
-                # instructions much more reliably.
-                try:
-                    from ..skills.skill_executor import (
-                        filter_native_search_tools as _filter_native,
-                        filter_custom_tools as _filter_custom,
-                    )
-                    from .tools import augment_custom_tools_with_skill_customs
-                    active_inj = skill_injection or post_tool_skill_injection
-                    if active_inj:
-                        # First augment with any skill-specific custom tool schemas (playwright, code exec, etc.)
-                        continuation_tools = augment_custom_tools_with_skill_customs(
-                            continuation_tools, getattr(active_inj, "allowed_custom", None)
-                        )
-                        continuation_native_search_tools = _filter_native(continuation_native_search_tools, active_inj)
-                        continuation_tools = _filter_custom(continuation_tools, active_inj)
-                        logger.debug(f"{cid_p}[SKILLS] Applied active/post-use_skill injection tool filters + custom schema augmentation on continuation")
                 except Exception:
                     pass
 
@@ -853,60 +701,6 @@ async def call_grok_for_groksito(
                 )
             except Exception:
                 pass  # never break main flow for metrics
-
-        # =====================================================================
-        # AUTOMATIC SKILL CREATION (recurring need detection) ΓÇö after the main work
-        # When a clear recurring pattern is detected (conservative: multiple times in a short
-        # recent window + semantic filters against game "skills"/builds), we create the skill
-        # directly with approved=True. A short natural confirmation is sent as a follow-up.
-        # No proposal/approval dance. Old proposal flow is bypassed.
-        # =====================================================================
-        # Defensive: may not be set if we short-circuited before the tool loop
-        if "direct_delivery_performed" not in locals():
-            direct_delivery_performed = False
-
-        try:
-            auto_enabled = True
-            try:
-                auto_enabled = bool(getattr(_settings, "enable_skill_auto_creation", True))
-            except Exception:
-                pass
-
-            # Only attempt if we didn't just use an existing skill and auto-create is on.
-            # When we offered the decision tool set (including create_skill) to the model this turn,
-            # we let the model decide via native tool calling instead of the old rule-based detector.
-            can_auto_create = (
-                auto_enabled
-                and not locals().get("offer_decision_tools", False)
-                and (decision is None or getattr(decision, "action", None) is None or decision.action.value != "use_skill")
-            )
-
-            if can_auto_create and original_message is not None:
-                from ..skills.skill_proposer import detect_and_create_skill
-                creation = await detect_and_create_skill(
-                    channel_id=channel_id,
-                    user_id=int(user_id) if user_id and user_id.isdigit() else 0,
-                    current_message=user_message_text,
-                    # min_occurrences and window are read inside the function from settings
-                )
-                if creation and creation.confirmation_message:
-                    conf_text = creation.confirmation_message
-                    # Fire a non-blocking, short, natural confirmation after the main reply
-                    async def _send_creation_confirmation(msg=original_message, text=conf_text):
-                        try:
-                            await asyncio.sleep(1.1)
-                            await msg.channel.send(text)
-                            logger.info(f"{cid_p}[SKILLS] Sent auto-creation confirmation for '{creation.skill.name}'")
-                        except Exception as send_err:
-                            logger.debug(f"{cid_p}[SKILLS] Could not send creation confirmation: {send_err}")
-
-                    try:
-                        if not direct_delivery_performed:
-                            asyncio.create_task(_send_creation_confirmation())
-                    except Exception:
-                        pass
-        except Exception as create_err:
-            logger.debug(f"{cid_p}[SKILLS] Auto skill creation check skipped (non-fatal): {create_err}")
 
         # Final extraction + sentinel handling
         return _finalize_response(response, direct_delivery_performed, cid_p)

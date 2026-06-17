@@ -1,4 +1,4 @@
-"""LLM client (Grok Responses), prompt building, input assembly, tools, helpers, sandbox.
+"""LLM client (Grok Responses), prompt building, input assembly, tools, helpers.
 
 Reexports for `from groksito_discord.llm import call_grok...` compat (used by core.conversation etc).
 """

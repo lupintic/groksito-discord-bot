@@ -10,10 +10,7 @@ Key features:
   so the model can choose *how* to deliver responses (reply vs reaction vs threaded) for greater agency.
 - Uses media_tools for image/video generation
 - Respects the centralized config (ENABLE_VIDEO_GENERATION etc.)
-- Sandboxed power tools (code_execution, playwright_browser) live in sandbox.py
-  and are only offered when an approved skill explicitly declares them.
-- Skill meta/decision tools (create_skill, edit_skill, use_skill, etc. + testing harness + custom schema augmentation)
-  live in skill_tools.py to keep this file focused on the public surface + core media/reply dispatch + tiering.
+- Light decision tools (get_recent_context, respond_directly) for on-demand context and explicit final replies
 """
 
 from __future__ import annotations
@@ -35,26 +32,6 @@ from .media_tools import (
     _handle_generate_audio,
     ENABLE_VIDEO_GENERATION,
     has_explicit_audio_intent,
-)
-
-from .skill_tools import (
-    # Skill meta schemas (re-exported so get_tools_for_request and internal references continue to work)
-    _create_skill_schema,
-    _get_recent_context_schema,
-    _use_skill_schema,
-    _edit_skill_schema,
-    _respond_directly_schema,
-    _code_execution_schema,
-    _playwright_browser_schema,
-    # Augmentation helpers (still part of the public-ish surface used by llm.py)
-    get_skill_specific_custom_schemas,
-    augment_custom_tools_with_skill_customs,
-    # Extracted handlers for the meta tools
-    handle_create_skill,
-    handle_edit_skill,
-    handle_use_skill,
-    handle_get_recent_context,
-    handle_respond_directly,
 )
 
 logger = logging.getLogger("groksito.tools")
@@ -276,44 +253,8 @@ async def execute_hybrid_tool(
         if name == "generate_audio":
             return await _handle_generate_audio(args, original_message)
 
-        if name == "code_execution":
-            # Delegated to the isolated sandbox module (only reachable for skills that explicitly allow it).
-            from .sandbox import run_code_execution
-            code = str(args.get("code", ""))[:10000]
-            timeout = float(args.get("timeout_seconds", 30))
-            return await run_code_execution(code, timeout_seconds=timeout)
-
-        if name == "playwright_browser":
-            # Delegated to the isolated sandbox module (only reachable for skills that explicitly allow it).
-            # The sandbox implementation uses safe config passing (env var + json) instead of
-            # host-side f-string interpolation of model-controlled values into the executed Python source.
-            from .sandbox import run_playwright_browser
-            action = str(args.get("action", "extract_text")).lower()
-            url = str(args.get("url", "")).strip()
-            instructions = str(args.get("instructions", "")).strip()[:500]
-            selector = str(args.get("selector", "")).strip()
-            timeout_ms = int(args.get("timeout_ms", 30000))
-            return await run_playwright_browser(
-                url=url,
-                action=action,
-                instructions=instructions,
-                selector=selector,
-                timeout_ms=timeout_ms,
-            )
-
-        if name == "create_skill":
-            # Delegated to skill_tools.py (keeps tools.py focused; all the heavy prescriptive schema
-            # logic + testing harness lives there).
-            return await handle_create_skill(args, original_message)
-
         if name == "get_recent_context":
             return await handle_get_recent_context(args, original_message)
-
-        if name == "use_skill":
-            return await handle_use_skill(args, original_message)
-
-        if name == "edit_skill":
-            return await handle_edit_skill(args, original_message)
 
         if name == "respond_directly":
             return await handle_respond_directly(args, original_message)
@@ -334,9 +275,7 @@ async def execute_hybrid_tool(
 #
 # This (tiered + lazy + tiny schemas for media) is the main lever against heavy tool schema overhead (full image gen was >2700 chars).
 #
-# Note: Skill-related meta schemas (_create_skill_schema, _use_skill_schema, _edit_skill_schema, etc.)
-# and the testing harness live in skill_tools.py. They are imported above for use in get_tools_for_request
-# and execute_hybrid_tool delegation.
+
 
 
 def _get_channel_context_schema_light() -> dict:
@@ -422,15 +361,69 @@ def _get_create_thread_schema_light() -> dict:
     }
 
 
-# (All skill meta schemas, custom schemas, helpers and handlers extracted to skill_tools.py — imported at top of this file.)
+def _get_recent_context_schema() -> dict:
+    return {
+        "type": "function",
+        "name": "get_recent_context",
+        "description": (
+            "Fetches a compact, targeted on-demand summary of recent messages in the current Discord channel. "
+            "Helpful when the user's question refers to or continues prior discussion, shared context, or earlier turns in the thread. "
+            "After receiving the summary you can reason further or call respond_directly (or other tools) to deliver the final answer."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "max_messages": {
+                    "type": "integer",
+                    "description": "Optional: how many recent messages to base the summary on (default ~12-15).",
+                }
+            },
+        },
+    }
+
+
+def _respond_directly_schema() -> dict:
+    return {
+        "type": "function",
+        "name": "respond_directly",
+        "description": (
+            "Explicit signal that you will now produce the final, user-facing reply using your built-in knowledge, "
+            "the provided conversation context, referenced messages, and any information already gathered from prior tool calls. "
+            "Calling this ends the current tool-calling phase for the turn and delivers the complete answer."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    }
+
+
+async def handle_get_recent_context(args: dict[str, Any], original_message: Any = None) -> str:
+    try:
+        logger.info(f"{cid_prefix()}[DECISION] model chose get_recent_context")
+        ch = getattr(original_message, "channel", None)
+        ch_id = getattr(ch, "id", 0) if ch else 0
+        from ..context.context_summarizer import summarize_recent_conversation
+        summary = await summarize_recent_conversation(ch_id)
+        if summary:
+            return (
+                f"RECENT CHANNEL CONTEXT SUMMARY:\n{summary}\n\n"
+                "Use this to maintain conversational coherence or answer references to prior messages."
+            )
+        return "No substantial recent conversation context available for this channel."
+    except Exception as e:
+        return f"Could not retrieve recent context: {str(e)[:150]}"
+
+
+async def handle_respond_directly(args: dict[str, Any], original_message: Any = None) -> str:
+    logger.info(f"{cid_prefix()}[DECISION] model chose respond_directly")
+    return (
+        "DECISION: respond directly. I now have enough information to formulate the final answer "
+        "to the user without further tool calls or actions."
+    )
+
 
 def get_continuation_tools(
     has_visual_intent: bool = False,
     has_explicit_video_intent: bool = False,
     has_explicit_audio_intent: bool = False,
-    offer_create_skill_tool: bool = False,  # accepted for API compatibility but ignored on continuations (creation is first-turn meta)
-    offer_decision_tools: bool = False,  # accepted for API compatibility but ignored on continuations (decision tools are first-turn only)
-    offer_light_decision_tools: bool = False,  # accepted for compat; never on cont
 ) -> list[dict]:
     """
     Highly optimized custom tool set for continuation rounds
@@ -499,7 +492,7 @@ def log_tool_selection(
 ) -> None:
     """
     Structured logging for tool *schema* decisions (what we offer the model).
-    Complements runtime decision logs in execute_hybrid_tool + [DECISION] in skill handlers (see #23).
+    Complements runtime decision logs in execute_hybrid_tool + [DECISION] handlers.
     Called from llm.py after we finalize what tools to send.
     """
     try:
@@ -599,8 +592,6 @@ def get_tools_for_request(
     has_explicit_audio_intent: bool = False,
     is_tool_continuation: bool = False,
     pure_image_gen: bool = False,
-    offer_create_skill_tool: bool = False,
-    offer_decision_tools: bool = False,
     offer_light_decision_tools: bool = False,
 ) -> list[dict]:
     """
@@ -628,8 +619,6 @@ def get_tools_for_request(
             has_visual_intent=has_visual_intent,
             has_explicit_video_intent=has_explicit_video_intent,
             has_explicit_audio_intent=has_explicit_audio_intent,
-            offer_decision_tools=False,
-            offer_light_decision_tools=False,
         )
 
     # === ULTRA-AGGRESSIVE "image_gen" MODE (Opción 1) ===
@@ -670,10 +659,10 @@ def get_tools_for_request(
     # reply_to_user (plus react_to_message / create_thread) become available when light/full decision tools are offered
     # (plain addressed turns) or on continuations, giving the model explicit choice over delivery style.
     # This advances the agentic goal (see ticket #21 and Target Architecture #9).
-    if query_need == "casual" and not offer_light_decision_tools and not offer_decision_tools:
+    if query_need == "casual" and not offer_light_decision_tools:
         return []
 
-    if query_need in ("minimal", "image_gen") and not has_visual_intent and not offer_light_decision_tools and not offer_decision_tools:
+    if query_need in ("minimal", "image_gen") and not has_visual_intent and not offer_light_decision_tools:
         return []
 
     # Build custom tools. No internal search or channel history tools (removed for simplification).
@@ -696,35 +685,8 @@ def get_tools_for_request(
         except Exception:
             pass
 
-    if offer_create_skill_tool or offer_decision_tools:
-        try:
-            tools.append(_create_skill_schema())
-        except Exception:
-            pass
-
-    if offer_decision_tools:
-        try:
-            tools.append(_edit_skill_schema())
-            tools.append(_get_recent_context_schema())
-            tools.append(_use_skill_schema())
-            tools.append(_respond_directly_schema())
-            # Surface core Discord actions (reply/react/thread) under full decision offering too so model has consistent choice of delivery style.
-            tools.append(_get_reply_to_user_schema_light())
-            tools.append(_get_react_to_message_schema_light())
-            tools.append(_get_create_thread_schema_light())
-        except Exception:
-            pass
-        # Include image gen/edit on full decision turns too (consistent with light path) for native Grok Imagine choice.
-        if not has_visual_intent:
-            try:
-                tools.append(_generate_image_schema_tiny())
-                tools.append(_edit_image_schema())
-            except Exception:
-                pass
-    elif offer_light_decision_tools:
-        # Light decision only (plain addressed normal/minimal): core delivery actions (reply/react/thread)
-        # plus the decision signals (get_recent + respond_directly). Heavy skill tools (create/edit/use) stay behind strong signals.
-        # This is the primary path that lets Grok choose *how* to deliver on normal addressed turns (the agentic direction).
+    if offer_light_decision_tools:
+        # Light decision on addressed turns: delivery actions + on-demand context + respond_directly.
         try:
             tools.append(_get_reply_to_user_schema_light())
             tools.append(_get_react_to_message_schema_light())
