@@ -88,7 +88,7 @@ Discord (Gateway + REST)
 
 ### LLM & Tools (`llm/`)
 - `prompt_builder.py`: Single source for `SYSTEM_PROMPT` and native search tool descriptions (completeness + nativeness guidance).
-- `llm_input.py`: Sole builder of `initial_input` — light classification for logging/gating, minimal `[R:]`/chain injection on addressed turns, separate system blocks for prompt-cache friendliness.
+- `llm_input.py`: Sole builder of `initial_input` — exactly one stable system message (SYSTEM_PROMPT) + single user message. Light `[R:]` + compact emoji notes folded into user content on addressed turns (maximizes prompt_cache_key prefix stability for the fixed SYSTEM_PROMPT).
 - `client.py`: OpenAI-compatible Responses API against `https://api.x.ai/v1`, three-phase orchestration (prep → first turn → tool loop), `previous_response_id` continuations with conservative native-search re-offer.
 - `llm_utils.py`: Native search schema builder (descriptions from `prompt_builder`), token/cache logging, API retry helper.
 - Tool selection and prompt content are intentionally minimal; Grok's native reasoning + `previous_response_id` drive most decisions and continuity.
