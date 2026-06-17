@@ -137,11 +137,17 @@ X_SEARCH_STANDARD_DESCRIPTION = (
 def get_native_search_descriptions(query_text: str) -> tuple[str, str]:
     """Return (web_search_description, x_search_description) for native tool schemas.
 
-    Descriptions mirror SYSTEM_PROMPT completeness guidance — single source of truth.
+    Descriptions are intentionally stable (always the comprehensive pair) to maximize
+    prompt_cache_key prefix effectiveness for a given user across turns.
+    Completeness + freshness + judgment guidance lives in SYSTEM_PROMPT and model reasoning.
+    The query_text argument is kept for signature compatibility.
     """
-    if needs_breadth_grounding(query_text):
-        return WEB_SEARCH_BREADTH_DESCRIPTION, X_SEARCH_BREADTH_DESCRIPTION
-    return WEB_SEARCH_STANDARD_DESCRIPTION, X_SEARCH_STANDARD_DESCRIPTION
+    # Always return the richer breadth-oriented descriptions. This removes per-query
+    # variation in the tools= payload while the model still receives full nuance from
+    # SYSTEM_PROMPT (see FRESHNESS_GUIDANCE, WEB_SEARCH_BREADTH_GUIDANCE, etc.).
+    # Low-risk: breadth language is a superset that improves multi-option cases and is
+    # harmless for simple factual queries.
+    return WEB_SEARCH_BREADTH_DESCRIPTION, X_SEARCH_BREADTH_DESCRIPTION
 
 
 SYSTEM_PROMPT = f"""You are Grok (Groksito on this Discord server).
