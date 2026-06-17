@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # Purpose: Safely prepare the project for GitHub / public sharing.
-# This Discord bot (Python) stores live runtime state, learned skills,
-# conversation context, health metrics, and — most importantly — secrets
+# This Discord bot (Python) stores live runtime state, conversation context,
+# health metrics, and — most importantly — secrets
 # (Discord bot token + xAI/Grok API keys or OAuth tokens).
 #
 # ONLY real secrets, machine-generated caches, logs, and per-run data
@@ -76,7 +76,8 @@ venv-*/
 # -----------------------------------------------------------------------------
 # data/ holds live bot state that must not be committed:
 #   - bot_guilds.json, bot_health.json, bot_heartbeat.json, bot_stats.json
-#   - skills.json, emoji_knowledge.json, pantsu_context.json, etc.
+#   - emoji_knowledge.json, pantsu_context.json, steam_app_list.json (cache), etc.
+#   - skills.json may exist locally from an old experiment; it is unused and gitignored.
 # The folder itself is kept in the repo via data/.gitkeep so the structure
 # exists for new clones. All actual .json content inside is ignored.
 data/
