@@ -31,7 +31,7 @@ Discord (Gateway + REST)
 │  │  media)      │   └───────────────────────────────┘      │
 │  └──────────────┘                                          │
 │                                                            │
-│  Steam (integrations/steam.py)  •  Grok OAuth (grok_oauth) │
+│  Steam (discord/integrations/steam.py)  •  Grok OAuth (grok_oauth) │
 └─────────────────────────────────────────────────────────────┘
         │ (shared volumes: data/, oauth/, .env)
         ▼
@@ -74,7 +74,7 @@ Discord (Gateway + REST)
 - Native Grok tools (`web_search`, `x_search`) are available via the Responses API when appropriate.
 - Multi-turn tool loop with proper `previous_response_id` continuation, prompt caching, and token usage logging.
 
-### 4. Steam Integration (`integrations/steam.py`)
+### 4. Steam Integration (`discord/integrations/steam.py`)
 - Pure data layer: player count fetching (Steam Charts / Steam API), fuzzy name resolution, robust thumbnail URL construction (multiple CDN patterns + store scrape fallback).
 - Used by the three slash commands registered in `client.py`. Embeds are built with game-specific colors and store links.
 - No secrets, no rate-limit coupling with the LLM path.
