@@ -39,13 +39,17 @@ DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR.parent / "data"))
 CONTEXT_FILE = DATA_DIR / "pantsu_context.json"
 ENV_FILE = BASE_DIR.parent / ".env"   # mounted in docker
 
-# Make bot modules importable (web is independent but reuses env_utils + config)
+# Prefer editable install (`pip install -e .`). Thin fallback for bare checkout runs.
 import sys
-BOT_SRC = BASE_DIR.parent / "src"
-if str(BOT_SRC) not in sys.path:
-    sys.path.insert(0, str(BOT_SRC))
 
-# Unified safe .env handling (single source of truth shared with setup.py)
+try:
+    import groksito_discord  # noqa: F401
+except ImportError:
+    _bot_src = BASE_DIR.parent / "src"
+    if str(_bot_src) not in sys.path:
+        sys.path.insert(0, str(_bot_src))
+
+# Unified safe .env handling (single source of truth shared with scripts/configure_env.py)
 from groksito_discord.utils.env_utils import (
     safe_write_env,
     parse_env_file,

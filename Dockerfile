@@ -37,15 +37,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better layer caching
-COPY requirements.txt .
+# Copy packaging metadata + requirements first for better layer caching
+COPY pyproject.toml README.md requirements.txt .
 
-# Install the full dependency set (bot + web libs)
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Copy the full application (bot + dashboard for convenience when running the bot image)
+# Install deps then register the package (canonical import: groksito_discord)
 COPY src ./src
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir --no-deps -e .
+
+# Copy dashboard (not part of the wheel)
 COPY web ./web
 
 # Create runtime directories (good for volume mounts even before first write)
@@ -59,7 +60,7 @@ ENV PYTHONUNBUFFERED=1 \
     DATA_DIR=/app/data
 
 # Default process for the bot service (compose can still override)
-CMD ["python", "-m", "src.groksito_discord"]
+CMD ["groksito"]
 
 # -----------------------------------------------------------------------------
 # Web stage — slim dashboard-only image (FastAPI + the modules it actually uses)
@@ -68,20 +69,17 @@ FROM base AS web
 
 # Web-only minimal dependencies.
 # See requirements-web.txt for the explicit list and rationale.
-COPY requirements-web.txt .
+COPY pyproject.toml README.md requirements-web.txt .
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements-web.txt
-
-# We only need the small surface that web/main.py actually imports:
-#   - groksito_discord.env_utils (stdlib only)
-# Copying the whole src/ tree is simple, future-proof, and tiny (pure .py).
-# The huge size saving comes from the slim pip layer + skipping the ffmpeg apt work.
 COPY src ./src
 COPY web ./web
 
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements-web.txt && \
+    pip install --no-cache-dir --no-deps -e .
+
 # Same directories as the bot image so volume mounts and path logic in web/main.py
-# (BASE_DIR.parent / "src" + DATA_DIR) continue to work without surprises.
+# (editable install + DATA_DIR) continue to work without surprises.
 RUN mkdir -p /app/data && chmod 755 /app/data \
  && mkdir -p /app/oauth && chmod 755 /app/oauth
 

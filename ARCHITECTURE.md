@@ -116,6 +116,13 @@ Discord (Gateway + REST)
 5. Media: register → generate → deliver publicly → sentinel suppresses duplicate text.
 6. Heartbeats/stats written for dashboard.
 
+## Packaging & Deployment
+
+- `pyproject.toml` with console script `groksito` (`python -m groksito_discord` also works).
+- `scripts/configure_env.py` for interactive `.env` setup.
+- Multi-stage Dockerfile: `bot` (ffmpeg) and `web` (slim dashboard).
+- `docker-compose.yml`: independent bot and web services with recommended `data/` and `oauth/` volumes.
+
 ## Extension Points
 
 - New chat tools → `llm/tools.py` + handler in `media/` or `core/`.

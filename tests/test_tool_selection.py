@@ -4,16 +4,16 @@ High-value tests for tool selection logic (tools.py + interaction with media fla
 These protect the "extreme laziness" + "only offer heavy tools on explicit visual"
 philosophy that keeps token usage low and the experience feeling native.
 
-We call the public entry points (get_tools_for_request, get_continuation_tools, get_heavy_tools)
+We call the public entry points (get_tools_for_request, get_continuation_tools)
 with the same arguments the LLM layer would pass.
 """
 
 import pytest
 
+import groksito_discord.llm.tools as tools_mod
 from groksito_discord.llm.tools import (
     get_tools_for_request,
     get_continuation_tools,
-    get_heavy_tools,
 )
 
 
@@ -140,14 +140,62 @@ class TestContinuationToolMinimization:
         assert "edit_image" in names
         assert "generate_video" in names
 
-    def test_heavy_tools_helper_respects_flags(self, patch_video_enabled):
+    def test_visual_media_consolidated_on_continuation(self, patch_video_enabled):
+        """Visual media on continuations uses the same offering path as first-turn visual."""
         patch_video_enabled(True)
-        heavy = get_heavy_tools(has_visual_intent=True, has_explicit_video_intent=True)
-        names = _tool_names(heavy)
-        assert {"generate_image", "edit_image", "generate_video"} <= names
+        tools = get_continuation_tools(
+            has_visual_intent=True,
+            has_explicit_video_intent=False,
+        )
+        names = _tool_names(tools)
+        assert "generate_image" in names
+        assert "edit_image" in names
+        assert "generate_video" not in names
 
-        heavy_no_video = get_heavy_tools(has_visual_intent=True, has_explicit_video_intent=False)
-        assert "generate_video" not in _tool_names(heavy_no_video)
+
+class TestLegacyToolRemoval:
+    """Removed duplicate helpers and legacy get_channel_context offering (#75)."""
+
+    def test_get_heavy_tools_public_api_removed(self):
+        assert not hasattr(tools_mod, "get_heavy_tools")
+
+    @pytest.mark.parametrize(
+        "factory,kwargs",
+        [
+            (
+                get_tools_for_request,
+                {
+                    "query_need": "normal",
+                    "has_visual_intent": True,
+                    "is_tool_continuation": False,
+                },
+            ),
+            (
+                get_tools_for_request,
+                {
+                    "query_need": "normal",
+                    "offer_light_decision_tools": True,
+                    "is_tool_continuation": False,
+                },
+            ),
+            (
+                get_continuation_tools,
+                {"has_visual_intent": False},
+            ),
+            (
+                get_continuation_tools,
+                {"has_visual_intent": True, "has_explicit_video_intent": True},
+            ),
+        ],
+    )
+    def test_get_channel_context_never_offered(self, factory, kwargs, patch_video_enabled, monkeypatch):
+        patch_video_enabled(True)
+        monkeypatch.setattr(
+            "groksito_discord.config.settings.aggressive_continuation_tool_minimization",
+            False,
+        )
+        names = _tool_names(factory(**kwargs))
+        assert "get_channel_context" not in names
 
 
 class TestLightDecisionOffer:

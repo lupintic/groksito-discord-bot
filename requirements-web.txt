@@ -1,6 +1,7 @@
 # =============================================================================
 # Groksito Web Dashboard — Minimal Requirements
 # =============================================================================
+# Web subset of pyproject.toml deps; keep versions aligned with [project.dependencies].
 # Used exclusively by the "web" build stage in the multi-stage Dockerfile.
 # This produces a much smaller image (~300 MB range) compared to the full
 # bot image that needs discord.py, openai client, pydub, ffmpeg, docker-ce-cli, etc.

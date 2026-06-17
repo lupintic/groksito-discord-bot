@@ -71,7 +71,7 @@ The bot is designed around "maximum nativeness": minimal custom memory or contex
 git clone https://github.com/lupintic/groksito-discord-bot.git
 cd groksito-discord-bot
 
-# 2. Create .env (or use setup.py for guided setup)
+# 2. Create .env (or use scripts/configure_env.py for guided setup)
 cp .env.example .env
 # Edit .env — at minimum: DISCORD_BOT_TOKEN and XAI_API_KEY (or plan to use --login-oauth)
 

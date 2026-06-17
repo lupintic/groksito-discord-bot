@@ -139,14 +139,7 @@ async def execute_hybrid_tool(
         except Exception:
             pass
 
-        if name == "get_channel_context":
-            limit = int(args.get("limit", 8))
-            return context.get_channel_context(
-                getattr(original_message, "channel", None).id if original_message else 0,
-                max_lines=limit
-            )
-
-        # (search_discord_messages tool fully removed for simplification; only referenced replies + native tools remain)
+        # (search_discord_messages and get_channel_context tools removed; use get_recent_context on light turns)
 
         if name == "reply_to_user":
             content = args.get("content", "")
@@ -278,21 +271,6 @@ async def execute_hybrid_tool(
 
 
 
-def _get_channel_context_schema_light() -> dict:
-    """Minimal version for normal turns."""
-    return {
-        "type": "function",
-        "name": "get_channel_context",
-        "description": "Fetches a window of the most recent messages from the current Discord channel. Provides raw recent activity when the ongoing conversation or references in the thread make channel history relevant to formulating a good reply.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "limit": {"type": "integer", "default": 8}
-            }
-        }
-    }
-
-
 def _get_reply_to_user_schema_light() -> dict:
     return {
         "type": "function",
@@ -420,6 +398,30 @@ async def handle_respond_directly(args: dict[str, Any], original_message: Any = 
     )
 
 
+def _append_visual_media_tools(
+    tools: list[dict],
+    *,
+    has_visual_intent: bool = False,
+    has_explicit_video_intent: bool = False,
+    has_explicit_audio_intent: bool = False,
+) -> None:
+    """Append heavy media schemas when creation signals justify them (first-turn + continuation)."""
+    if has_visual_intent:
+        tools.append(_generate_image_schema())
+        tools.append(_edit_image_schema())
+        if ENABLE_VIDEO_GENERATION and has_explicit_video_intent:
+            try:
+                tools.append(_generate_video_schema())
+            except Exception:
+                pass
+
+    if has_explicit_audio_intent:
+        try:
+            tools.append(_generate_audio_schema())
+        except Exception:
+            pass
+
+
 def get_continuation_tools(
     has_visual_intent: bool = False,
     has_explicit_video_intent: bool = False,
@@ -438,44 +440,18 @@ def get_continuation_tools(
       While the model usually retains knowledge of previously declared tools
       via previous_response_id, reply_to_user is too critical for correct
       media UX to risk removing without extensive production testing.
-    - History tools (search/channel) dropped on continuation in minimal path (simplified model: only referenced message injected on replies; rely on Grok's native state).
+    - History tools dropped on continuation (use get_recent_context on addressed light turns).
 
-    Heavy media tools (including video) are still offered when we were in a visual flow.
-    Video is only re-offered if explicit video intent was previously detected.
+    Heavy media tools are re-offered only when we were already in a visual/audio flow.
     """
-    tools: list[dict] = []
+    tools: list[dict] = [_get_reply_to_user_schema_light()]
 
-    # Safe import (works both in normal package usage and direct script runs)
-    try:
-        from ..config import settings as _settings
-        use_minimal = getattr(_settings, "aggressive_continuation_tool_minimization", True)
-    except Exception:
-        use_minimal = True  # safe default
-
-    if use_minimal:
-        # Recommended aggressive mode: only the tool needed for final delivery.
-        tools.append(_get_reply_to_user_schema_light())
-    else:
-        # Safer fallback mode (if problems are observed)
-        tools.append(_get_reply_to_user_schema_light())
-        tools.append(_get_channel_context_schema_light())
-
-    # Re-offer heavy media tools only if we were already in a visual *creation* flow.
-    if has_visual_intent:
-        tools.extend(
-            get_heavy_tools(
-                has_visual_intent=True,
-                has_explicit_video_intent=has_explicit_video_intent,
-                has_explicit_audio_intent=has_explicit_audio_intent,
-            )
-        )
-
-    # Audio can also be re-offered on continuations if it was relevant
-    if has_explicit_audio_intent:
-        try:
-            tools.append(_generate_audio_schema())
-        except Exception:
-            pass
+    _append_visual_media_tools(
+        tools,
+        has_visual_intent=has_visual_intent,
+        has_explicit_video_intent=has_explicit_video_intent,
+        has_explicit_audio_intent=has_explicit_audio_intent,
+    )
 
     return tools
 
@@ -553,38 +529,6 @@ def log_tool_selection(
     tools_logger.info(msg)
 
 
-def get_heavy_tools(
-    has_visual_intent: bool = False,
-    has_explicit_video_intent: bool = False,
-    has_explicit_audio_intent: bool = False,
-) -> list[dict]:
-    """
-    Returns the expensive tools (media generation).
-    Only include when the query or signals clearly justify them (part of lazy/nativeness strategy).
-
-    has_visual_intent here means *strict image creation/edit intent* (not mere presence of images or analysis).
-    This prevents offering generate_image/edit_image in mixed cases (e.g. reply-to-image + factual/current question).
-
-    Video is guarded by both visual intent + explicit keyword + feature flag.
-    Audio (TTS) is offered on explicit audio requests (can be text-only or referring to previous content).
-    """
-    tools: list[dict] = []
-
-    if has_visual_intent:
-        tools.append(_generate_image_schema())
-        tools.append(_edit_image_schema())
-        if ENABLE_VIDEO_GENERATION and has_explicit_video_intent:
-            tools.append(_generate_video_schema())
-
-    if has_explicit_audio_intent:
-        try:
-            tools.append(_generate_audio_schema())
-        except Exception:
-            pass
-
-    return tools
-
-
 def get_tools_for_request(
     query_need: str = "normal",
     has_visual_intent: bool = False,
@@ -637,7 +581,6 @@ def get_tools_for_request(
 
         if is_explicit_video:
             try:
-                from .media_tools import _generate_video_schema
                 tools.append(_generate_video_schema())
             except Exception:
                 pass
@@ -669,21 +612,12 @@ def get_tools_for_request(
     # Native web/x are offered separately in llm.py based on need (normal/rich).
     tools: list[dict] = []
 
-    if has_visual_intent:
-        tools.append(_generate_image_schema())
-        tools.append(_edit_image_schema())
-        if ENABLE_VIDEO_GENERATION and has_explicit_video_intent:
-            try:
-                from .media_tools import _generate_video_schema
-                tools.append(_generate_video_schema())
-            except Exception:
-                pass
-
-    if has_explicit_audio_intent:
-        try:
-            tools.append(_generate_audio_schema())
-        except Exception:
-            pass
+    _append_visual_media_tools(
+        tools,
+        has_visual_intent=has_visual_intent,
+        has_explicit_video_intent=has_explicit_video_intent,
+        has_explicit_audio_intent=has_explicit_audio_intent,
+    )
 
     if offer_light_decision_tools:
         # Light decision on addressed turns: delivery actions + on-demand context + respond_directly.
