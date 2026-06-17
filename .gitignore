@@ -110,7 +110,11 @@ scratch*.py
 # Tooling / agent scratch directories (Grok Build, implementers, etc.)
 # These often contain plans, summaries, and debug output that should never be committed.
 docs/
+AGENTS.md
+agents.md
+Agents.md
 tmp/
+tests/data/
 
 # Grok Builds runtime (local tooling only — never commit; do not delete from workspace).
 # The Discord bot app has no committed MCP/skills integration; these dirs are session artifacts.

@@ -148,11 +148,11 @@ Never commit `.env` or `oauth/xai_oauth_tokens.json`.
 
 ### Repository layout
 
-Committed project roots: `src/`, `tests/`, `web/`, `data/.gitkeep`, Docker files, and docs.
+Committed project roots: `src/`, `tests/`, `web/`, `data/.gitkeep`, Docker files, and root docs (`README.md`, `ARCHITECTURE.md`, `GROK_OAUTH.md`).
 
-- `data/` — runtime state written by the bot (heartbeats, context, Steam app-list cache). Contents are gitignored except this placeholder.
+- `data/` — runtime state written by the bot (heartbeats, context, Steam app-list cache). Contents are gitignored except the empty `data/.gitkeep` placeholder.
 - `oauth/` — OAuth tokens from `--login-oauth` (gitignored).
-- `.grok/`, `mcps/`, `agent-tools/`, `terminals/` — Grok Build / MCP session artifacts when developing with AI tooling. Not part of the Discord bot runtime; never commit them.
+- `docs/`, `AGENTS.md`, `.grok/`, `mcps/`, `agent-tools/`, `terminals/` — local agent/workflow artifacts when developing with AI tooling. Not part of the Discord bot runtime; never commit them.
 
 ## 📄 License
 

@@ -40,10 +40,17 @@ def test_session_artifact_dirs_not_tracked_in_git():
         "mcp-tool-schemas/",
         "terminals/",
         ".grok/",
+        "docs/",
     )
+    forbidden_exact = {
+        "AGENTS.md",
+        "agents.md",
+        "Agents.md",
+    }
     for path in tracked:
         for prefix in forbidden_prefixes:
             assert not path.startswith(prefix), f"Session artifact tracked in git: {path}"
+        assert path not in forbidden_exact, f"Agent guidance file tracked in git: {path}"
 
 
 def test_runtime_data_json_not_tracked_except_gitkeep():
@@ -55,5 +62,14 @@ def test_runtime_data_json_not_tracked_except_gitkeep():
 
 def test_gitignore_covers_grok_session_artifacts():
     gitignore = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")
-    for pattern in (".grok/", "mcps/", "agent-tools/", "terminals/", "mcp-tool-schemas/"):
+    for pattern in (
+        ".grok/",
+        "mcps/",
+        "agent-tools/",
+        "terminals/",
+        "mcp-tool-schemas/",
+        "docs/",
+        "AGENTS.md",
+        "tests/data/",
+    ):
         assert pattern in gitignore
