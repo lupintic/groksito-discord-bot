@@ -19,7 +19,7 @@ The bot is designed around "maximum nativeness": minimal custom memory or contex
 - **Direct Media Generation (Grok-native)**
   - Image generation (`generate_image`) with Grok Imagine — supports stylized and suggestive content per Grok's model policy.
   - Image editing (`edit_image`).
-  - Video generation (`generate_video`): text-to-video and image-to-video (toggleable).
+  - Video generation (`generate_video`): text-to-video and image-to-video (toggleable). Offered natively on addressed turns (same pattern as images); limits come from your xAI/SuperGrok subscription, not a bot-side daily cap. Image-to-video infers aspect ratio from the reference image to avoid stretched output.
   - TTS audio (`generate_audio`): multiple voices (eve, ara, rex, sal, leo) with language control. Dedicated `/audio` slash command and context menu "🔊 Leer en voz alta".
 
 - **Discord Interaction Tools**

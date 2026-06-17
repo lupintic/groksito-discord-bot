@@ -2,7 +2,8 @@
 Core implementation for Groksito conversation context.
 
 This module contains the actual state, persistence, update logic, classification,
-video quotas, and helper functions.
+and helper functions. Video generation limits are not tracked here — xAI/SuperGrok
+subscription quotas apply at the API (Grok web parity).
 
 The package __init__.py re-exports the public surface for backward compatibility
 with existing imports like `from . import context` and `from .context import ...`.
@@ -17,7 +18,7 @@ import json
 import logging
 import time
 from collections import defaultdict, deque
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,10 +66,6 @@ _channel_summaries: dict[int, dict[str, Any]] = defaultdict(
     lambda: {"summary": "", "last_updated": 0.0, "message_count_at_update": 0}
 )
 
-# Simple per-user daily video quota (5/day). Persisted with the rest of context.
-# Only today's count is kept (old days don't affect the limit).
-_video_quotas: dict[int, dict[str, int]] = {}
-
 # History buffer maxlen for optional summarization / legacy.
 # No longer used for default injection (only referenced on bot replies).
 MAX_RAW_HISTORY = 8
@@ -86,33 +83,6 @@ def update_channel_summary(channel_id: int, new_summary: str) -> None:
     logger.info(
         f"{cid_prefix()}[Context] Updated channel summary for {channel_id} ({len(new_summary)} chars)"
     )
-
-
-# =============================================================================
-# Video quota (simple per-user daily limit of 5, for honest "5 videos/day" claim)
-# =============================================================================
-# Reuses the existing context persistence (no new files). Only today's count is
-# relevant; we filter on load/save. Increment is optimistic (before API call)
-# for minimal code. Videos are rare so save on every change is fine.
-
-
-def get_video_quota(user_id: int) -> tuple[int, int]:
-    """Return (used_today, remaining). Never negative remaining."""
-    today = date.today().isoformat()
-    used = _video_quotas.get(user_id, {}).get(today, 0)
-    return used, max(0, 5 - used)
-
-
-def increment_video_quota(user_id: int) -> tuple[int, int]:
-    """Increment for today and return (new_used, new_remaining). Persists."""
-    today = date.today().isoformat()
-    if user_id not in _video_quotas:
-        _video_quotas[user_id] = {}
-    _video_quotas[user_id][today] = _video_quotas[user_id].get(today, 0) + 1
-    used = _video_quotas[user_id][today]
-    remaining = max(0, 5 - used)
-    save_context()  # cheap and rare (videos limited)
-    return used, remaining
 
 
 # =============================================================================
@@ -190,13 +160,6 @@ def _load_context() -> None:
             ch_id = int(ch_str)
             _channel_summaries[ch_id].update(sum_data)
 
-        # Load video quotas (only keep today's; daily limit resets on new day)
-        today = date.today().isoformat()
-        for uid_str, qdata in data.get("video_quotas", {}).items():
-            uid = int(uid_str)
-            if today in qdata and qdata[today] > 0:
-                _video_quotas[uid] = {today: qdata[today]}
-
         logger.info(
             f"{cid_prefix()}✅ Context loaded from {path} (channels={len(_channel_histories)}, users={len(_user_profiles)})"
         )
@@ -255,21 +218,12 @@ def save_context() -> bool:
                     "message_count_at_update": sdata.get("message_count_at_update", 0),
                 }
 
-        # Persist video quotas (only today's count)
-        today = date.today().isoformat()
-        video_serial = {}
-        for uid, qs in _video_quotas.items():
-            c = qs.get(today, 0)
-            if c > 0:
-                video_serial[str(uid)] = {today: c}
-
         payload = {
             "version": 1,
             "saved_at": time.time(),
             "channels": channels_serial,
             "profiles": profiles_serial,
             "channel_summaries": summaries_serial,
-            "video_quotas": video_serial,
         }
 
         path.write_text(

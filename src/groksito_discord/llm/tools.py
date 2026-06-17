@@ -11,6 +11,8 @@ Key features:
 - Uses media_tools for image/video generation
 - Respects the centralized config (ENABLE_VIDEO_GENERATION etc.)
 - Light decision tools (get_recent_context, respond_directly) for on-demand context and explicit final replies
+- On addressed turns, generate_image + generate_video (tiny schemas) are offered together so Grok
+  decides natively — no keyword gate for tool availability (xAI subscription limits apply at execution)
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from .. import context
 from ..media.delivery import register_image_request, consume_image_request
 from .media_tools import (
     _generate_video_schema,
+    _generate_video_schema_tiny,
     _handle_generate_video,
     _handle_generate_image,
     _handle_edit_image,
@@ -409,11 +412,17 @@ def _append_visual_media_tools(
     if has_visual_intent:
         tools.append(_generate_image_schema())
         tools.append(_edit_image_schema())
-        if ENABLE_VIDEO_GENERATION and has_explicit_video_intent:
+        if ENABLE_VIDEO_GENERATION:
             try:
                 tools.append(_generate_video_schema())
             except Exception:
                 pass
+    elif ENABLE_VIDEO_GENERATION and has_explicit_video_intent:
+        # Continuation / non-light paths: re-offer video when the turn still has video signals.
+        try:
+            tools.append(_generate_video_schema_tiny())
+        except Exception:
+            pass
 
     if has_explicit_audio_intent:
         try:
@@ -536,6 +545,7 @@ def get_tools_for_request(
     has_explicit_audio_intent: bool = False,
     is_tool_continuation: bool = False,
     pure_image_gen: bool = False,
+    pure_video_gen: bool = False,
     offer_light_decision_tools: bool = False,
 ) -> list[dict]:
     """
@@ -571,27 +581,22 @@ def get_tools_for_request(
     # - Never edit_image (edit cases are caught by the detector or have explicit edit signals)
     # - No other custom tools, and native search is not offered (handled in _build_native_search_tools)
     # This + zero context + short system = the path to <1000 tokens.
-    if pure_image_gen:
-        # Pure first-turn creation requests get an ultra-light custom tool set.
-        # - Pure image: only the tiny generate_image schema.
-        # - Pure video (T2V, routed here via pure image/video intent detector): only the generate_video schema.
-        #   Avoids sending an irrelevant tiny image schema on "genera un video de..." style requests.
-        tools: list[dict] = []
-        is_explicit_video = ENABLE_VIDEO_GENERATION and has_explicit_video_intent
+    if pure_video_gen and ENABLE_VIDEO_GENERATION:
+        try:
+            return [_generate_video_schema_tiny()]
+        except Exception:
+            return []
 
-        if is_explicit_video:
-            try:
-                tools.append(_generate_video_schema())
-            except Exception:
-                pass
-        elif has_explicit_audio_intent:
+    if pure_image_gen:
+        # Pure first-turn image creation: only the tiny generate_image schema.
+        tools: list[dict] = []
+        if has_explicit_audio_intent:
             try:
                 tools.append(_generate_audio_schema())
             except Exception:
                 pass
         else:
             tools.append(_generate_image_schema_tiny())
-
         return tools
 
     # === MAXIMUM LAZINESS for first-turn tools (native Grok feel) ===
@@ -630,17 +635,15 @@ def get_tools_for_request(
         except Exception:
             pass
 
-        # Offer image generation (tiny schema) + edit on addressed turns so Grok can *natively*
-        # reason about whether to call grok-imagine (generate_image) for any natural phrasing
-        # ("me generas una imagen...", "draw the cat in a suit...", etc). This removes the previous
-        # hard client-side heuristic gate (has_visual_intent / is_pure only) for tool *availability*.
-        # The model decides via its tool-calling reasoning + the tool description. Pure ultra-light
-        # path (when detector catches) still offers only the action tool with zero extra context.
-        # Video/audio remain explicitly gated (quota-sensitive).
+        # Offer image + video generation (tiny schemas) + edit on addressed turns so Grok can
+        # *natively* reason about media creation — same pattern as Grok web (model decides;
+        # no keyword gate for tool availability; xAI subscription limits apply at the API).
         if not has_visual_intent:
             try:
                 tools.append(_generate_image_schema_tiny())
                 tools.append(_edit_image_schema())
+                if ENABLE_VIDEO_GENERATION:
+                    tools.append(_generate_video_schema_tiny())
             except Exception:
                 pass
 

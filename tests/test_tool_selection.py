@@ -53,19 +53,16 @@ class TestFirstTurnLaziness:
         assert "edit_image" not in names
         assert "generate_video" not in names
 
-    def test_pure_image_gen_plus_explicit_video_offers_video_too(self, patch_video_enabled):
+    def test_pure_video_gen_mode_only_tiny_generate_video(self, patch_video_enabled):
         patch_video_enabled(True)
         tools = get_tools_for_request(
             query_need="image_gen",
             has_visual_intent=False,
-            has_explicit_video_intent=True,
             is_tool_continuation=False,
-            pure_image_gen=True,
+            pure_video_gen=True,
         )
         names = _tool_names(tools)
-        # Pure video intent + pure_image_gen path deliberately offers *only* the video schema
-        # (avoids irrelevant generate_image on "haz un video de..." requests).
-        assert "generate_video" in names
+        assert names == {"generate_video"}, "pure_video_gen should offer only the tiny generate_video schema"
         assert "generate_image" not in names
         assert "edit_image" not in names
 
@@ -84,14 +81,13 @@ class TestVisualIntentTriggersMedia:
         names = _tool_names(tools)
         assert "generate_image" in names
         assert "edit_image" in names
-        assert "generate_video" not in names  # no explicit video intent
+        assert "generate_video" in names  # video offered with visual creation path when enabled
 
-    def test_visual_plus_explicit_video_offers_video_when_enabled(self, patch_video_enabled):
+    def test_visual_intent_offers_video_when_enabled(self, patch_video_enabled):
         patch_video_enabled(True)
         tools = get_tools_for_request(
             query_need="rich",
             has_visual_intent=True,
-            has_explicit_video_intent=True,
             is_tool_continuation=False,
         )
         names = _tool_names(tools)
@@ -102,7 +98,6 @@ class TestVisualIntentTriggersMedia:
         tools = get_tools_for_request(
             query_need="normal",
             has_visual_intent=True,
-            has_explicit_video_intent=True,
             is_tool_continuation=False,
         )
         names = _tool_names(tools)
@@ -140,6 +135,16 @@ class TestContinuationToolMinimization:
         assert "edit_image" in names
         assert "generate_video" in names
 
+    def test_continuation_offers_video_on_explicit_intent_without_visual(self, patch_video_enabled):
+        patch_video_enabled(True)
+        tools = get_continuation_tools(
+            has_visual_intent=False,
+            has_explicit_video_intent=True,
+        )
+        names = _tool_names(tools)
+        assert "generate_video" in names
+        assert "generate_image" not in names
+
     def test_visual_media_consolidated_on_continuation(self, patch_video_enabled):
         """Visual media on continuations uses the same offering path as first-turn visual."""
         patch_video_enabled(True)
@@ -150,7 +155,7 @@ class TestContinuationToolMinimization:
         names = _tool_names(tools)
         assert "generate_image" in names
         assert "edit_image" in names
-        assert "generate_video" not in names
+        assert "generate_video" in names
 
 
 class TestLegacyToolRemoval:
@@ -227,8 +232,21 @@ class TestLightDecisionOffer:
         assert "create_skill" not in names
         assert "edit_skill" not in names
         assert "use_skill" not in names
-        # 5 delivery/decision + 2 image tools
-        assert len(names) <= 7
+        # 5 delivery/decision + 2 image tools + video (native parity with Grok web)
+        assert "generate_video" in names
+        assert len(names) <= 8
+
+    def test_light_decision_offers_video_without_keyword_gate(self, patch_video_enabled):
+        """Addressed turns offer generate_video natively (like generate_image), no keyword gate."""
+        patch_video_enabled(True)
+        tools = get_tools_for_request(
+            query_need="normal",
+            has_visual_intent=False,
+            has_explicit_video_intent=False,
+            offer_light_decision_tools=True,
+        )
+        names = _tool_names(tools)
+        assert "generate_video" in names
 
     def test_light_on_minimal_addressed_sim(self, patch_video_enabled):
         patch_video_enabled(True)

@@ -39,6 +39,12 @@ class TestHasExplicitVideoIntent:
             # Mixed / embedded in longer text (still explicit intent)
             ("por favor haz un video de un zorro corriendo", True, "intent inside sentence"),
             ("puedes hacer un video de esta imagen??", True, "question + intent"),
+            (
+                "ahora me podrias generar un video de esa imagen porfis",
+                True,
+                "polite reply-to-bot I2V phrasing",
+            ),
+            ("generar un video de la foto", True, "infinitive 'generar un video'"),
         ],
     )
     def test_positive_cases(self, text, expected, reason):

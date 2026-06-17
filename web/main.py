@@ -370,34 +370,14 @@ def save_env_updates(path: Path, updates: dict[str, Any]) -> tuple[bool, str]:
 
 
 def get_quotas() -> dict[str, Any]:
-    """Read quotas from shared pantsu_context.json (video only for now)."""
-    quotas: dict[str, Any] = {
+    """Usage placeholders — Groksito does not enforce bot-side media quotas (xAI subscription limits apply)."""
+    return {
         "video": {},
-        "images": "Not quota-tracked (per-user daily video is the only hard limit)",
+        "images": "Not quota-tracked (xAI subscription limits apply)",
         "audio": "Not quota-tracked",
         "total_video_today": 0,
+        "video_note": "No bot-side daily cap; SuperGrok / xAI limits apply",
     }
-    if not CONTEXT_FILE.exists():
-        return quotas
-
-    try:
-        data = json.loads(CONTEXT_FILE.read_text(encoding="utf-8"))
-        video_quotas = data.get("video_quotas", {})
-        today = date.today().isoformat()
-
-        total = 0
-        per_user = {}
-        for uid_str, qdata in video_quotas.items():
-            used = qdata.get(today, 0)
-            per_user[uid_str] = used
-            total += used
-
-        quotas["video"] = per_user
-        quotas["total_video_today"] = total
-    except Exception:
-        pass
-
-    return quotas
 
 
 def get_config_for_display() -> dict[str, Any]:
@@ -711,7 +691,7 @@ def get_capabilities(health: dict[str, Any] | None = None, config_display: dict[
             "desc": "Text-to-Video and Image-to-Video (explicit intent)",
             "status": "active" if video_enabled else "disabled",
             "badge": "feature flag",
-            "detail": "5 videos / user / day" if video_enabled else "disabled in config",
+            "detail": "SuperGrok / xAI subscription limits" if video_enabled else "disabled in config",
         },
         {
             "name": "Web + X Search",

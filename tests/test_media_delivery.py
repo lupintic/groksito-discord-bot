@@ -12,6 +12,7 @@ import httpx
 
 from groksito_discord.media.delivery import (
     _download_url,
+    _request_ttl_for_operation,
     build_edit_caption,
     build_image_caption,
     build_video_caption,
@@ -102,9 +103,15 @@ async def test_download_url_retries_on_transient_failure():
     assert call_count == 2
 
 
+def test_video_request_ttl_exceeds_image_ttl():
+    assert _request_ttl_for_operation("video") > _request_ttl_for_operation("image")
+    assert _request_ttl_for_operation("video") >= 300
+
+
 def test_caption_builders_contain_no_urls():
     assert "http" not in build_image_caption("un gato con botas")
     assert "http" not in build_edit_caption()
-    cap = build_video_caption(from_image=False, duration=5, daily_used=1, daily_remaining=4)
+    cap = build_video_caption(from_image=False, duration=5)
     assert "http" not in cap
-    assert "1/5" in cap
+    assert "480p" in cap
+    assert "/5" not in cap

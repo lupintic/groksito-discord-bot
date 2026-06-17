@@ -161,7 +161,7 @@ The image creates `/app/oauth` at build time. The volume ensures tokens written 
 ## Quotas, Tiers, and Differences from API Keys
 
 - OAuth consumes your **SuperGrok / X Premium+ subscription quota** (not the pay-per-token developer API key pool).
-- Rate limits, daily video caps (the bot locally enforces limits such as "5 videos/day" via tracking), image allowances, etc. can differ from a console `XAI_API_KEY`.
+- Rate limits and media allowances are enforced by xAI/SuperGrok on the API side (Groksito does not apply a separate bot-side video daily cap).
 - Some accounts encounter 403s only on the OAuth client surface.
 - The functional experience (models, tools, endpoints) is otherwise identical.
 

@@ -50,6 +50,7 @@ from .llm_utils import (
     _extract_and_log_token_usage,
     _maybe_proactive_summarize,
     is_pure_image_generation_request,
+    is_pure_video_generation_request,
     _call_responses_with_retry,
 )
 
@@ -132,18 +133,24 @@ async def call_grok_for_groksito(
         if getattr(settings, "summarization_enabled", False):
             await _maybe_proactive_summarize(channel_id, original_message, client)
 
-        # Compute pure image gen intent *early* so we can pass it to the input builder for the dedicated "image_gen" mode.
+        # Pure media-gen intents for the ultra-minimal image_gen context+tools path (mirrors Grok web).
+        pure_video_gen_intent = False
         pure_image_gen_intent = False
         try:
-            # Pure image gen intent is driven by the (light) is_pure detector for the ultra-minimal
-            # image_gen context+tools path. Do NOT AND with _detect_visual_intent (that detector
-            # explicitly returns False on creation verbs to avoid misrouting "show pictures" search cases).
-            pure_image_gen_intent = (
+            if (
+                is_pure_video_generation_request(user_message)
+                and not bool(image_urls)
+                and not is_reply_continuation
+            ):
+                pure_video_gen_intent = True
+            elif (
                 is_pure_image_generation_request(user_message)
                 and not bool(image_urls)
                 and not is_reply_continuation
-            )
+            ):
+                pure_image_gen_intent = True
         except Exception:
+            pure_video_gen_intent = False
             pure_image_gen_intent = False
 
         # === SINGLE CALL to the authoritative input builder (llm_input.py) ===
@@ -159,7 +166,7 @@ async def call_grok_for_groksito(
             reply_chain_contexts=reply_chain_contexts,
             is_reply_continuation=is_reply_continuation,
             has_x_link_intent=has_x_link_intent,
-            image_gen_intent=pure_image_gen_intent,
+            image_gen_intent=pure_image_gen_intent or pure_video_gen_intent,
             is_reply_to_bot=is_reply_to_bot,
             is_mentioned=is_mentioned,
         )
@@ -223,6 +230,7 @@ async def call_grok_for_groksito(
             has_explicit_audio_intent=explicit_audio_intent,
             is_tool_continuation=False,
             pure_image_gen=pure_image_gen_intent,
+            pure_video_gen=pure_video_gen_intent,
             offer_light_decision_tools=offer_light_decision_tools,
         )
 
@@ -326,7 +334,7 @@ async def call_grok_for_groksito(
                         reply_chain_contexts=reply_chain_contexts,
                         is_reply_continuation=is_reply_continuation,
                         has_x_link_intent=has_x_link_intent,
-                        image_gen_intent=pure_image_gen_intent,
+                        image_gen_intent=pure_image_gen_intent or pure_video_gen_intent,
                         is_reply_to_bot=is_reply_to_bot,
                         is_mentioned=is_mentioned,
                     )
@@ -592,6 +600,7 @@ async def call_grok_for_groksito(
                     has_explicit_audio_intent=explicit_audio_intent,
                     is_tool_continuation=True,
                     pure_image_gen=pure_image_gen_intent,
+                    pure_video_gen=pure_video_gen_intent,
                 )
 
                 # === Native search tools on continuation ===

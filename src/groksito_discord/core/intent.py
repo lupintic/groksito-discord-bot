@@ -76,6 +76,44 @@ def is_pure_image_generation_request(text: str | None) -> bool:
     return True
 
 
+def is_pure_video_generation_request(text: str | None) -> bool:
+    """Strong signals for first-turn pure text-to-video (not I2V reply, not analysis).
+
+    Mirrors is_pure_image_generation_request for the ultra-light video_gen path
+    (zero context + tiny generate_video schema only). Tool availability on addressed
+    turns is no longer gated exclusively behind this — light decision tools offer
+    generate_video natively like generate_image.
+    """
+    if not text or len(text.strip()) < 5:
+        return False
+    t = text.lower()
+    positives = (
+        "genera un video", "generar un video", "generarme un video",
+        "generame un video", "generá un video", "generáme un video",
+        "haz un video", "hacé un video", "hace un video",
+        "hazme un video", "haceme un video",
+        "crea un video", "crear un video", "crearme un video",
+        "creame un video", "creá un video",
+        "quiero un video", "quiero que generes un video",
+        "necesito un video", "un video de un", "un video de una",
+        "haz video de", "genera video de", "generar video de",
+        "make a video of", "generate a video of", "create a video of",
+        "animate a scene", "animate a ",
+    )
+    if not any(p in t for p in positives):
+        return False
+    negatives = (
+        "esta imagen", "esta foto", "esa imagen", "esa foto",
+        "de esta", "de esa", "la imagen", "la foto", "referencia",
+        "analiza", "describe", "qué ves", "que ves", "qué es el video",
+        "quiero ver", "ver un video", "ver el video", "mira el video",
+        "edit", "edita", "imagen de",
+    )
+    if any(n in t for n in negatives):
+        return False
+    return True
+
+
 def needs_breadth_grounding(text: str | None) -> bool:
     """Light signal that a query likely benefits from broad, multi-option coverage.
 
