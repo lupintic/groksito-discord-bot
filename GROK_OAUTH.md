@@ -15,17 +15,17 @@ No `XAI_API_KEY` is required when a valid OAuth access token is present. The sam
 
 ```bash
 # One-time login (opens browser by default)
-python -m src.groksito_discord --login-oauth
+groksito --login-oauth
 
 # Status and verification
-python -m src.groksito_discord --auth-status
-python -m src.groksito_discord --test-auth     # performs a real minimal call with the token
+groksito --auth-status
+groksito --test-auth     # performs a real minimal call with the token
 
 # Variants
-python -m src.groksito_discord --login-oauth --no-browser
-python -m src.groksito_discord --login-oauth --print-url-only
-python -m src.groksito_discord --login-oauth --manual-paste
-python -m src.groksito_discord --logout-oauth
+groksito --login-oauth --no-browser
+groksito --login-oauth --print-url-only
+groksito --login-oauth --manual-paste
+groksito --logout-oauth
 ```
 
 After a successful login, set in your `.env` (recommended for clarity):
@@ -54,11 +54,11 @@ The exact same bearer string is used for the Responses client and raw `Authoriza
 
 1. `cp .env.example .env`
 2. (Optional) Set `GROK_AUTH_MODE=auto` (or `oauth`)
-3. `python -m src.groksito_discord --login-oauth`
+3. `groksito --login-oauth`
 4. Browser opens → log in with the X account that has SuperGrok / Premium+.
 5. Approve the Groksito (or "Grok CLI") client.
 6. Callback received → tokens saved locally.
-7. Run `python -m src.groksito_discord --auth-status` and `--test-auth` (strongly recommended).
+7. Run `groksito --auth-status` and `--test-auth` (strongly recommended).
 8. Start the bot normally.
 
 You can leave an `XAI_API_KEY` in the file; it will only be used as fallback when no valid OAuth token is available.
@@ -74,7 +74,7 @@ On the server (or via `docker compose run`):
 ```bash
 docker compose run --rm groksito-discord-bot --login-oauth --print-url-only
 # or without compose:
-python -m src.groksito_discord --login-oauth --print-url-only
+groksito --login-oauth --print-url-only
 ```
 
 Copy the printed authorization URL.
@@ -96,7 +96,7 @@ Publish the port temporarily or use the same SSH tunnel technique. Then run with
 ### Manual paste fallback
 
 ```bash
-python -m src.groksito_discord --login-oauth --manual-paste
+groksito --login-oauth --manual-paste
 ```
 
 Open the printed URL on any machine with a browser, complete login, then paste the full callback URL (or just the `code=...` value) back into the terminal on the server.
@@ -182,9 +182,9 @@ If you hit limits or 403s you cannot accept, the classic `XAI_API_KEY` path rema
 ## Testing After Setup (No Discord Required)
 
 ```bash
-python -m src.groksito_discord --auth-status
-python -m src.groksito_discord --test-auth
-python -m src.groksito_discord --status
+groksito --auth-status
+groksito --test-auth
+groksito --status
 ```
 
 `--test-auth` performs a minimal real Grok call using the exact bearer the rest of the bot will use.

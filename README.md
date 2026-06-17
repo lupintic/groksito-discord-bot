@@ -71,20 +71,21 @@ The bot is designed around "maximum nativeness": minimal custom memory or contex
 git clone https://github.com/lupintic/groksito-discord-bot.git
 cd groksito-discord-bot
 
-# 2. Create .env (or use setup.py for guided setup)
+# 2. Create .env (or use scripts/configure_env.py for guided setup)
 cp .env.example .env
 # Edit .env — at minimum: DISCORD_BOT_TOKEN and XAI_API_KEY (or plan to use --login-oauth)
 
-# 3. (Recommended) Install + validate
-python -m pip install -r requirements.txt
-python -m src.groksito_discord --check
+# 3. (Recommended) Editable install + validate
+python -m pip install -e .
+groksito --check
 
 # 4. (Optional but powerful) Login with OAuth instead of / in addition to API key
-python -m src.groksito_discord --login-oauth
+groksito --login-oauth
 # or for Docker/VPS: --login-oauth --print-url-only  (then SSH tunnel from laptop)
 
 # 5. Run the bot
-python -m src.groksito_discord
+groksito
+# or: python -m groksito_discord
 ```
 
 Useful CLI flags:

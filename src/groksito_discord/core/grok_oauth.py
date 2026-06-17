@@ -22,19 +22,19 @@ Usage (from code):
         ...
 
     # One-time setup (owner only):
-    #   python -m src.groksito_discord --login-oauth
-    #   python -m src.groksito_discord --login-oauth --no-browser
-    #   python -m src.groksito_discord --login-oauth --print-url-only   # Docker / VPS + ssh -L
-    #   python -m src.groksito_discord --auth-status
-    #   python -m src.groksito_discord --logout-oauth
-    #   python -m src.groksito_discord --test-auth   # verify after login
+    #   groksito --login-oauth
+    #   groksito --login-oauth --no-browser
+    #   groksito --login-oauth --print-url-only   # Docker / VPS + ssh -L
+    #   groksito --auth-status
+    #   groksito --logout-oauth
+    #   groksito --test-auth   # verify after login
 
 CLI integration (added in __main__):
-    python -m src.groksito_discord --login-oauth
-    python -m src.groksito_discord --login-oauth --no-browser
-    python -m src.groksito_discord --login-oauth --print-url-only   # great for Docker
-    python -m src.groksito_discord --auth-status
-    python -m src.groksito_discord --logout-oauth
+    groksito --login-oauth
+    groksito --login-oauth --no-browser
+    groksito --login-oauth --print-url-only   # great for Docker
+    groksito --auth-status
+    groksito --logout-oauth
 """
 
 from __future__ import annotations
@@ -525,7 +525,7 @@ def _refresh_tokens(tokens: XaiOAuthTokens) -> Optional[XaiOAuthTokens]:
                 "[OAuth] Refresh token is invalid/expired (invalid_grant or equivalent). "
                 "This usually happens after token revocation or long inactivity. "
                 "You MUST re-login to continue using OAuth mode:\n"
-                "    python -m src.groksito_discord --login-oauth\n"
+                "    groksito --login-oauth\n"
                 "The invalid tokens have been cleared."
             )
             try:
@@ -751,7 +751,7 @@ def print_auth_status() -> None:
     if not tokens:
         if settings.auth_mode == "oauth":
             print(f"  OAuth: NO TOKENS STORED (path: {path})")
-            print("  Run: python -m src.groksito_discord --login-oauth")
+            print("  Run: groksito --login-oauth")
         return
 
     exp = tokens.expires_at
@@ -834,5 +834,5 @@ def ensure_valid_grok_token() -> Optional[str]:
     """Startup / pre-call convenience. Tries to ensure we have *something* usable."""
     b = get_grok_bearer()
     if not b and settings.auth_mode == "oauth":
-        logger.error("[OAuth] GROK_AUTH_MODE=oauth but no valid token. Run: python -m src.groksito_discord --login-oauth")
+        logger.error("[OAuth] GROK_AUTH_MODE=oauth but no valid token. Run: groksito --login-oauth")
     return b

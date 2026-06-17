@@ -733,7 +733,7 @@ async def call_grok_for_groksito(
                 try:
                     from ..core.grok_oauth import get_grok_bearer
                     if settings.auth_prefers_oauth or settings.using_oauth:
-                        hint = " (OAuth token may be invalid/expired or tier-restricted ΓÇö try `python -m src.groksito_discord --login-oauth` or switch to XAI_API_KEY)"
+                        hint = " (OAuth token may be invalid/expired or tier-restricted ΓÇö try `groksito --login-oauth` or switch to XAI_API_KEY)"
                 except Exception:
                     pass
                 return f"Problema de autenticaci├│n con Grok (401/403).{hint}"

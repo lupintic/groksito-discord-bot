@@ -1,6 +1,7 @@
 # =============================================================================
 # Groksito Discord Bot — Standalone Requirements
 # =============================================================================
+# Keep in sync with [project.dependencies] in pyproject.toml (canonical source).
 # This is the curated dependency list for the independent conversational bot.
 # It deliberately excludes FastMCP, uvicorn, spotipy, and other MCP-gateway-only deps.
 #
