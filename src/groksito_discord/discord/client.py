@@ -930,7 +930,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
             except Exception as emoji_track_err:
                 logger.debug(f"{cid_p}[Emoji] record_emojis_from_message failed (non-fatal): {emoji_track_err}")
 
-            # Always track context (for get_channel_context tool, get_recent_context tool, optional old summarization, legacy)
+            # Always track context (for get_recent_context tool and optional summarization)
             # Also capture images and links so the on-demand recent context summarizer (used by tool)
             # can analyze images (vision) and do surface search on links.
             image_urls: list[str] = []
