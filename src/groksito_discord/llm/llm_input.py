@@ -257,7 +257,7 @@ async def build_responses_input(
     # See emoji_registry.py for the full design. The goal is "Grok-like" natural usage, not forced emotes.
     emoji_full_block = ""
     try:
-        from . import emoji_registry
+        from ..utils import emoji_registry
         gid = None
         try:
             if original_message and getattr(original_message, "guild", None):
@@ -271,8 +271,8 @@ async def build_responses_input(
             emoji_full_block = emoji_registry.get_emoji_descriptions_for_prompt(gid, max_emotes=40)
             if emoji_full_block:
                 logger.debug(f"{cid_prefix()}[CONTEXT] Injected full server custom emoji list (addressed turn)")
-    except Exception:
-        pass
+    except Exception as emoji_ctx_err:
+        logger.debug(f"{cid_prefix()}[Emoji] emoji prompt injection skipped (non-fatal): {emoji_ctx_err}")
 
     try:
         injected_chars = len(dynamic_context_block)

@@ -177,11 +177,11 @@ async def execute_hybrid_tool(
                 # Normalize emoji shortcodes so custom emotes actually render.
                 # The model sometimes emits <:name:ID> instead of the clean :name: shortcode.
                 try:
-                    from . import emoji_registry
+                    from ..utils import emoji_registry
                     gid = getattr(getattr(original_message, "guild", None), "id", None)
                     content = emoji_registry.normalize_bot_emoji_output(content, gid)
-                except Exception:
-                    pass
+                except Exception as emoji_norm_err:
+                    tools_logger.debug(f"[Emoji] reply_to_user normalization skipped (non-fatal): {emoji_norm_err}")
 
                 await original_message.reply(content, mention_author=False)
                 # Log bot utterance (for buffer / optional summary / legacy completeness).
@@ -213,11 +213,11 @@ async def execute_hybrid_tool(
             try:
                 # Best-effort normalization for custom guild emojis (if model used :shortcode:).
                 try:
-                    from . import emoji_registry
+                    from ..utils import emoji_registry
                     gid = getattr(getattr(original_message, "guild", None), "id", None)
                     emoji = emoji_registry.normalize_bot_emoji_output(emoji, gid)
-                except Exception:
-                    pass
+                except Exception as emoji_norm_err:
+                    tools_logger.debug(f"[Emoji] react_to_message normalization skipped (non-fatal): {emoji_norm_err}")
                 await original_message.add_reaction(emoji)
                 return f"Reaction {emoji} added successfully."
             except Exception as e:
@@ -234,11 +234,11 @@ async def execute_hybrid_tool(
             try:
                 # Normalize any custom emoji shortcodes in the posted content.
                 try:
-                    from . import emoji_registry
+                    from ..utils import emoji_registry
                     gid = getattr(getattr(original_message, "guild", None), "id", None)
                     content = emoji_registry.normalize_bot_emoji_output(content, gid)
-                except Exception:
-                    pass
+                except Exception as emoji_norm_err:
+                    tools_logger.debug(f"[Emoji] create_thread normalization skipped (non-fatal): {emoji_norm_err}")
 
                 thread = await original_message.create_thread(name=thread_name)
                 # Send the opening content inside the thread.

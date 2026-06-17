@@ -44,8 +44,11 @@ from .correlation import cid_prefix
 # Bearer resolution (same as media handlers)
 try:
     from ..core.grok_oauth import get_grok_bearer
-except Exception:
+except ImportError as oauth_import_err:
     get_grok_bearer = None  # type: ignore
+    logging.getLogger("groksito.emoji").debug(
+        f"[Emoji] OAuth bearer resolver unavailable: {oauth_import_err}"
+    )
 
 logger = logging.getLogger("groksito.emoji")
 
@@ -148,8 +151,8 @@ async def _resolve_bearer() -> str | None:
             tok = get_grok_bearer()
             if tok:
                 return tok
-        except Exception:
-            pass
+        except Exception as bearer_err:
+            logger.debug(f"[Emoji] get_grok_bearer failed (non-fatal): {bearer_err}")
     return (
         os.getenv("XAI_API_KEY")
         or getattr(settings, "xai_api_key", None)

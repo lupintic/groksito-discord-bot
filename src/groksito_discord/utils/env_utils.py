@@ -43,12 +43,15 @@ can import them even in minimal environments.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("groksito.env")
 
 # =============================================================================
 # Constants
@@ -203,9 +206,8 @@ def parse_env_file(path: Path) -> dict[str, str]:
                 key = m.group(1)
                 val = m.group(2) or m.group(3) or m.group(4) or ""
                 values[key] = val
-    except Exception:
-        # Best effort; never crash the saver on a weird .env
-        pass
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning(f"Failed to parse .env at {path} (non-fatal): {e}")
     return values
 
 
@@ -215,7 +217,8 @@ def parse_env_lines(path: Path) -> list[str]:
         return []
     try:
         return path.read_text(encoding="utf-8").splitlines(keepends=True)
-    except Exception:
+    except OSError as e:
+        logger.warning(f"Failed to read .env lines from {path} (non-fatal): {e}")
         return []
 
 
@@ -240,7 +243,8 @@ def backup_env(path: Path) -> Path | None:
         shutil.copy2(path, ts_bak)
         shutil.copy2(path, latest)
         return ts_bak
-    except Exception:
+    except OSError as e:
+        logger.warning(f"Failed to backup .env at {path} (non-fatal): {e}")
         return None
 
 
@@ -415,16 +419,16 @@ def safe_write_env(
         try:
             with open(tmp, "rb") as f:
                 os.fsync(f.fileno())
-        except Exception:
-            pass  # fsync is best-effort
+        except OSError as fsync_err:
+            logger.debug(f"fsync after .env write best-effort failed: {fsync_err}")
         os.replace(tmp, path)
-    except Exception as e:
+    except OSError as e:
         # Attempt to restore on catastrophic write failure
         if backup_path and backup_path.exists():
             try:
                 shutil.copy2(backup_path, path)
-            except Exception:
-                pass
+            except OSError as restore_err:
+                logger.error(f"Failed to restore .env from backup after write error: {restore_err}")
         return False, f"Write failed: {e}. Backup restored if possible.", backup_path
 
     # Post-write safety verification for critical keys
@@ -436,8 +440,8 @@ def safe_write_env(
             if backup_path and backup_path.exists():
                 try:
                     shutil.copy2(backup_path, path)
-                except Exception:
-                    pass
+                except OSError as restore_err:
+                    logger.error(f"Failed to restore .env after critical key loss: {restore_err}")
             return False, (
                 f"SAFETY ABORT: Critical key {ck} disappeared after write. "
                 "File restored from backup. No secrets were lost."

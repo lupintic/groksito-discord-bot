@@ -40,6 +40,7 @@ from ..utils.correlation import (
     generate_correlation_id,
     set_correlation_id,
 )
+from ..utils.errors import log_auxiliary_failure
 
 import discord
 
@@ -836,8 +837,13 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
             write_bot_guilds_snapshot(guilds_list)
             write_bot_stats()
             write_bot_health_snapshot()
-        except Exception:
-            pass
+        except Exception as health_err:
+            log_auxiliary_failure(
+                logger,
+                "initial health snapshot write",
+                health_err,
+                feature="Health",
+            )
 
     # Extra lifecycle events for more accurate web dashboard status
     @_discord_client.event
@@ -845,8 +851,13 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
         try:
             from ..core.health import write_bot_heartbeat
             write_bot_heartbeat(connected=False)
-        except Exception:
-            pass
+        except Exception as health_err:
+            log_auxiliary_failure(
+                logger,
+                "disconnect heartbeat write",
+                health_err,
+                feature="Health",
+            )
 
     @_discord_client.event
     async def on_resumed():
@@ -870,8 +881,13 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
             write_bot_guilds_snapshot(guilds_list)
             write_bot_stats()
             write_bot_health_snapshot()
-        except Exception:
-            pass
+        except Exception as health_err:
+            log_auxiliary_failure(
+                logger,
+                "resume health snapshot write",
+                health_err,
+                feature="Health",
+            )
 
     # on_message - thin orchestrator (most logic lives in conversation.py)
     #
@@ -909,10 +925,10 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
             # This lets us surface only the popular ones + do vision descriptions lazily instead of
             # processing every single one of the 100-200 emotes some servers have.
             try:
-                from . import emoji_registry
+                from ..utils import emoji_registry
                 emoji_registry.record_emojis_from_message(message)
-            except Exception:
-                pass
+            except Exception as emoji_track_err:
+                logger.debug(f"{cid_p}[Emoji] record_emojis_from_message failed (non-fatal): {emoji_track_err}")
 
             # Always track context (for get_channel_context tool, get_recent_context tool, optional old summarization, legacy)
             # Also capture images and links so the on-demand recent context summarizer (used by tool)
@@ -938,8 +954,8 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
                     for clean in extract_urls_from_text(message.content):
                         if clean and clean not in links:
                             links.append(clean)
-            except Exception:
-                pass
+            except Exception as attach_err:
+                logger.warning(f"{cid_p}[Message] attachment/link extraction failed (non-fatal): {attach_err}")
 
             context.update_from_message(
                 channel_id=message.channel.id,
@@ -991,16 +1007,16 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
                 try:
                     referenced = await message.channel.fetch_message(message.reference.message_id)
                     logger.info(f"{cid_p}[Reply] Fetched referenced message in client fallback")
-                except Exception:
-                    pass
+                except Exception as ref_fetch_err:
+                    logger.warning(f"{cid_p}[Reply] Client fallback fetch for referenced message failed: {ref_fetch_err}")
 
             referenced_context = await _build_referenced_context(referenced) if referenced else None
 
             is_meta = False
             try:
                 is_meta = context.is_conversation_meta_question(message.content or "")
-            except Exception:
-                pass
+            except Exception as meta_err:
+                logger.debug(f"{cid_p}[Meta] conversation meta detection failed (non-fatal): {meta_err}")
 
             # NOTE: No custom memory / rich channel context computation here.
             # Only referenced message is passed; classification (is_meta) still used for logging/heuristics.
@@ -1073,12 +1089,24 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
                         write_bot_guilds_snapshot(guilds_list)
                         write_bot_stats()
                         write_bot_health_snapshot()
-                    except Exception:
-                        pass
+                    except Exception as health_err:
+                        log_auxiliary_failure(
+                            logger,
+                            "periodic health snapshot write",
+                            health_err,
+                            feature="Health",
+                            level=logging.DEBUG,
+                        )
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as heartbeat_err:
                 # Never let the heartbeat task kill the bot
+                log_auxiliary_failure(
+                    logger,
+                    "heartbeat updater tick",
+                    heartbeat_err,
+                    feature="Health",
+                )
                 await asyncio.sleep(10)
 
     asyncio.create_task(_heartbeat_updater())
