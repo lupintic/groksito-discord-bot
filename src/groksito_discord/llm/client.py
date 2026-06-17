@@ -20,6 +20,7 @@ import time
 from typing import Any, Optional
 
 from ..utils.correlation import cid_prefix
+from ..utils.errors import format_tool_execution_error, is_image_fetch_404_error
 
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionError, APIError
 
@@ -215,7 +216,7 @@ async def call_grok_for_groksito(
                         initial_input = _inject(initial_input, skill_injection)
                         logger.info(f"{cid_p}[SKILLS] Skill '{skill_injection.skill.name}' injected into prompt")
         except Exception as dec_err:
-            logger.debug(f"{cid_p}[SKILLS] Decision layer skipped (non-fatal): {dec_err}")
+            logger.warning(f"{cid_p}[SKILLS] Decision layer skipped (non-fatal, degraded): {dec_err}")
 
         # === Smart Tool Selection + Native Tools ===
         # has_visual_intent from upstream is now STRICT image *creation/edit* intent (not just "image present").
@@ -416,14 +417,7 @@ async def call_grok_for_groksito(
                 extra_body={"prompt_cache_key": cache_key},
             )
         except Exception as api_err:
-            err_str = str(api_err)
-            err_lower = err_str.lower()
-            is_image_fetch_404 = bool(image_urls) and (
-                "fetching image failed" in err_lower
-                or ("404" in err_lower and ("image" in err_lower or "not found" in err_lower))
-                or "unrecoverable data loss" in err_lower  # the wrapper message from xAI for bad image fetches
-            )
-            if is_image_fetch_404:
+            if is_image_fetch_404_error(api_err, has_images=bool(image_urls)):
                 logger.warning(
                     f"{cid_p}[LLM][VISION] Image fetch 404 from xAI backend for {len(image_urls)} provided URL(s). "
                     f"These were likely stale Discord signed attachment URLs or transient embed previews from recent channel history. "
@@ -657,8 +651,18 @@ async def call_grok_for_groksito(
                         image_urls=image_urls,
                     )
                 except Exception as tool_exec_err:
-                    logger.exception(f"{cid_p}Tool execution failed for {name}")
-                    result = f"Error executing tool {name}: {tool_exec_err}"
+                    arg_keys = (
+                        list((raw_args or {}).keys())
+                        if isinstance(raw_args, dict)
+                        else None
+                    )
+                    result = format_tool_execution_error(
+                        name or "unknown_tool",
+                        tool_exec_err,
+                        round_num=round_num,
+                        arg_keys=arg_keys,
+                    )
+                    logger.error(f"{cid_p}[TOOLS] {result}", exc_info=True)
 
                 result_str = str(result)
 

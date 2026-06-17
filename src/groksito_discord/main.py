@@ -71,13 +71,15 @@ try:
         handlers=[_rich_handler],
         force=True,  # override any previous root config
     )
-except Exception:
-    # Very defensive: if rich import/setup fails (e.g. partial install), fall back silently
-    # to stdlib so the bot can still run.
+except Exception as rich_setup_err:
+    # Very defensive: if rich import/setup fails (e.g. partial install), fall back to stdlib.
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    logging.getLogger("groksito.bot").warning(
+        f"Rich logging setup failed, using stdlib fallback: {rich_setup_err}"
     )
 
 logger = logging.getLogger("groksito.bot")
@@ -101,8 +103,8 @@ def _is_running_in_docker() -> bool:
         # env var sometimes set by compose / custom entrypoints
         if os.getenv("DOCKER_CONTAINER") or os.getenv("container"):
             return True
-    except Exception:
-        pass
+    except OSError as docker_probe_err:
+        logger.debug(f"Docker detection probe failed (non-fatal): {docker_probe_err}")
     return False
 
 # Optional import for OAuth (lazy so api_key users don't pay import cost)
@@ -113,11 +115,12 @@ try:
         print_auth_status,
         get_grok_bearer,
     )
-except Exception:
+except Exception as oauth_import_err:
     login_oauth_interactive = None  # type: ignore
     logout_oauth = None  # type: ignore
     print_auth_status = None  # type: ignore
     get_grok_bearer = None  # type: ignore
+    logger.warning(f"[Auth] OAuth module import failed (OAuth CLI disabled): {oauth_import_err}")
 
 # (rich logging already configured at module top; no duplicate basicConfig here)
 
@@ -192,8 +195,8 @@ async def main() -> None:
             logger.info(f"[Auth] Effective credential ready ({src}).")
         else:
             logger.info("[Auth] No credential yet — use --login-oauth or XAI_API_KEY.")
-    except Exception:
-        pass
+    except Exception as auth_probe_err:
+        logger.warning(f"[Auth] Early credential probe failed (non-fatal): {auth_probe_err}")
 
     # Validate required secrets before attempting to connect
     try:
@@ -210,8 +213,8 @@ async def main() -> None:
     try:
         from .core.health import write_bot_heartbeat
         write_bot_heartbeat(connected=False, user="starting...")
-    except Exception:
-        pass
+    except Exception as hb_err:
+        logger.warning(f"[Health] Early heartbeat write failed (non-fatal, degraded): {hb_err}")
 
     try:
         from .discord.client import ensure_discord_connected
@@ -309,8 +312,8 @@ def run() -> None:
             try:
                 from .core.health import print_health_status
                 print_health_status()
-            except Exception:
-                pass
+            except Exception as health_err:
+                logger.warning(f"Health status unavailable during --auth-status: {health_err}")
             sys.exit(0)
 
         # ---------------------------------------------------------------------

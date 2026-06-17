@@ -585,8 +585,8 @@ async def _invoke_groksito(
                 from . import emoji_registry
                 gid = getattr(message.guild, "id", None) if getattr(message, "guild", None) else None
                 response_text = emoji_registry.normalize_bot_emoji_output(response_text, gid)
-            except Exception:
-                pass
+            except Exception as emoji_norm_err:
+                logger.debug(f"{cid_p}[Emoji] normalize_bot_emoji_output failed (non-fatal): {emoji_norm_err}")
 
             await safe_reply(message, response_text, mention_author=False)
     except Exception as e:
