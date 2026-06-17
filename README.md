@@ -125,7 +125,7 @@ High-level pieces live under `src/groksito_discord/`:
 - `bot.py` + `client.py` — Discord client, activation, slash commands, heartbeats.
 - `llm.py` + `llm_input.py` — Responses API orchestration, tiered tool selection, multi-turn tool loops.
 - `tools.py` + `media_tools.py` — custom Discord/media tools and light decision tools.
-- `integrations/steam.py` — player count fetching and embed data.
+- `discord/integrations/steam.py` — player count fetching and embed data.
 - `grok_oauth.py` — OAuth PKCE + token management.
 - `web/` — independent FastAPI dashboard (reuses only env_utils + config).
 
