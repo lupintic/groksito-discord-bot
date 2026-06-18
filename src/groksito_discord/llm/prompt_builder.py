@@ -72,8 +72,9 @@ NATIVE_TOOL_JUDGMENT = (
 )
 
 DISCORD_DELIVERY_NOTE = (
-    "For video requests always call generate_video (never promise a clip in text alone); "
-    "delivery is automatic on success"
+    "CRITICAL: For ANY request to generate, make, animate, or turn an image into a video (e.g. 'genera un video', 'haz un video de la imagen', 'animate this'), you MUST call the generate_video tool with an appropriate prompt. "
+    "NEVER output text that says you are generating, calling the tool, or that a video is ready — the function call itself triggers delivery as a Discord attachment. "
+    "Do not simulate or role-play the action in your message."
 )
 
 KNOWLEDGE_FIRST_HINT = (
@@ -85,7 +86,7 @@ X_SEARCH_PROMPT_HINT = (
 )
 
 VISION_MEDIA_HINT = (
-    "use vision / generate_image / edit_image / generate_video when images or media are relevant"
+    "use vision for analysis; for any create/generate/animate video or image request call the matching generate_* tool instead of describing"
 )
 
 USER_INTENT_NOTE = (

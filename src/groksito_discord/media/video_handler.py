@@ -224,31 +224,86 @@ async def _poll_for_video_completion(
     max_wait_seconds: int = 300,
     poll_interval: float = 5.0
 ) -> tuple[str, dict]:
-    """Poll the video status endpoint until done/failed/expired/timeout."""
-    start_time = asyncio.get_event_loop().time()
+    """Poll the video status endpoint until done/failed/expired/timeout or terminal HTTP error.
+
+    Key fix: always inspect HTTP status_code. 4xx (e.g. 400) on status checks means
+    the job has failed or the id is no longer valid on the backend — fail fast instead
+    of spinning until the hard timeout.
+    """
+    loop = asyncio.get_running_loop()
+    start_time = loop.time()
+    consecutive_bad = 0
+    poll_count = 0
 
     while True:
+        poll_count += 1
         try:
             resp = await http_client.get(
                 f"https://api.x.ai/v1/videos/{request_id}",
-                headers={"Authorization": f"Bearer {api_key}"}
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=30.0,
             )
-            data = resp.json()
-            status = str(data.get("status", "")).lower()
+            sc = resp.status_code
+            try:
+                data = resp.json() if resp.content else {}
+            except Exception:
+                data = {"_raw": (resp.text or "")[:300]}
 
-            if status == "done":
-                return "succeeded", data
-            elif status in ["failed", "expired"]:
-                return "failed", data
+            if sc < 400:
+                # 2xx (incl. 200 success + 202 Accepted) and 3xx are non-error responses
+                consecutive_bad = 0
+                if sc == 200:
+                    status = str((data or {}).get("status", "")).lower().strip()
+                    if status == "done":
+                        return "succeeded", data
+                    elif status in ["failed", "expired"]:
+                        return "failed", data
+                    # still processing/queued/unknown -> continue polling
+                    if poll_count <= 2 or poll_count % 6 == 0:
+                        logger.debug(f"{cid_prefix()}[Video] poll #{poll_count} for {request_id}: status={status or 'unknown'}")
+                # 202/204 etc: in-progress, just fall through to sleep
+            else:
+                consecutive_bad += 1
+                logger.warning(
+                    f"{cid_prefix()}[Video] Poll HTTP {sc} for {request_id} "
+                    f"(poll#{poll_count}, consec={consecutive_bad}): {str(data)[:180]}"
+                )
+                if sc in (400, 404, 403, 410, 422):
+                    # Terminal: job failed server-side or request became invalid.
+                    # Return immediately so the turn can finish (instead of long spin).
+                    return "failed", data
+                if consecutive_bad >= 3:
+                    # Persistent 5xx/429 etc — do not block the user for full timeout.
+                    return "failed", data or {"error": {"message": f"persistent poll HTTP {sc}"}}
 
-        except (httpx.TimeoutException, httpx.ConnectError, Exception) as e:
-            logger.warning(f"{cid_prefix()}[Video Polling] Transient error for {request_id}: {e}")
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            consecutive_bad += 1
+            logger.warning(f"{cid_prefix()}[Video Polling] Transient network for {request_id}: {type(e).__name__}")
+            if consecutive_bad >= 4:
+                return "failed", {"error": {"message": "too many transient poll errors"}}
             await asyncio.sleep(min(10.0, poll_interval * 1.5))
+            # re-evaluate timeout; skip normal sleep this iteration
+            if loop.time() - start_time > max_wait_seconds:
+                return "timeout", {}
+            continue
 
-        if asyncio.get_event_loop().time() - start_time > max_wait_seconds:
+        except Exception as e:
+            consecutive_bad += 1
+            logger.warning(f"{cid_prefix()}[Video Polling] Unexpected error for {request_id}: {e}")
+            if consecutive_bad >= 4:
+                return "failed", {"error": {"message": str(e)[:120]}}
+            if loop.time() - start_time > max_wait_seconds:
+                return "timeout", {}
+            continue
+
+        if loop.time() - start_time > max_wait_seconds:
             return "timeout", {}
 
-        await asyncio.sleep(poll_interval)
+        # normal or backoff sleep (only on clean poll cycle)
+        sleep_for = poll_interval
+        if consecutive_bad > 0:
+            sleep_for = min(15.0, poll_interval * (1 + 0.5 * min(consecutive_bad, 4)))
+        await asyncio.sleep(sleep_for)
 
 
 # =============================================================================
@@ -260,13 +315,11 @@ def _generate_video_schema() -> dict:
         "type": "function",
         "name": "generate_video",
         "description": (
-            "Generate a short video clip (grok-imagine-video, auto 480p, max 6s). "
-            "Supports text-to-video from a descriptive prompt or image-to-video animation from a reference image "
-            "(attached images and images from the referenced/replied message are already available). "
-            "For image-to-video, do NOT set aspect_ratio — the reference image framing is applied automatically. "
-            "Use when the user asks to create, generate, make, or animate video content. "
-            "Do NOT claim a video is ready without calling this tool; successful calls deliver the result "
-            "as a Discord attachment automatically."
+            "Generate a short video clip (grok-imagine-video, 480p, max 6s). "
+            "Supports text-to-video or image-to-video from a reference image in context (attached or from replied message). "
+            "MUST be called for any user request like 'genera un video', 'haz video de la imagen', 'animate this', etc. "
+            "NEVER describe the generation in text or claim it is happening — invoke the tool and let automatic delivery handle the attachment. "
+            "For image-to-video, omit aspect_ratio (inferred from reference). "
         ),
         "parameters": {
             "type": "object",
@@ -296,9 +349,10 @@ def _generate_video_schema_tiny() -> dict:
         "type": "function",
         "name": "generate_video",
         "description": (
-            "Generate a short video (grok-imagine-video, 480p, max 6s). "
-            "Text-to-video or image-to-video when a reference image is in context. "
-            "Omit aspect_ratio for image-to-video. Do NOT say the video is ready without calling this tool."
+            "Generate a short video clip (grok-imagine-video, 480p, max 6s). Use for text-to-video or image-to-video (when a reference image from the message or reply is provided in context). "
+            "Call this whenever the user explicitly asks to generate, make, create, animate, or convert an image to video. "
+            "You MUST call this tool instead of describing or pretending to generate the video in text. "
+            "Omit aspect_ratio for image-to-video (reference image drives framing). Delivery of the result is handled automatically."
         ),
         "parameters": {
             "type": "object",
@@ -431,10 +485,13 @@ async def _tool_generate_video(
                     if poll_status != "succeeded":
                         err_detail = ""
                         if isinstance(poll_data, dict):
-                            err_detail = (
-                                poll_data.get("error", {}).get("message")
-                                or poll_data.get("status", "")
-                            )
+                            err_obj = poll_data.get("error")
+                            if isinstance(err_obj, dict):
+                                err_detail = err_obj.get("message") or ""
+                            elif err_obj:
+                                err_detail = str(err_obj)
+                            if not err_detail:
+                                err_detail = poll_data.get("status") or poll_data.get("_raw") or ""
                         return f"Video generation {poll_status}. {err_detail}. Try a simpler prompt or different reference."
 
                     break  # success

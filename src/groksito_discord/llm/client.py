@@ -152,10 +152,10 @@ def _should_offer_light_decision(
     """Wrap should_offer_light_decision_tools with safe defaulting."""
     try:
         return should_offer_light_decision_tools(
-            user_message_text or user_message,
             is_mentioned=is_mentioned,
             is_reply_to_bot=is_reply_to_bot,
             context_need=context_need,
+            user_message=user_message_text or user_message,
         )
     except Exception:
         return False
@@ -273,6 +273,9 @@ def _select_tools_for_first_turn(
     pure_video_gen_intent: bool,
 ) -> dict[str, Any]:
     """Phase 2: intent signals + custom/native tool schema selection for first turn."""
+    explicit_video_intent = has_explicit_video_intent(user_message_text)
+    explicit_audio_intent = has_explicit_audio_intent(user_message_text)
+
     creation_visual_intent = (
         has_visual_intent
         or _detect_image_creation_intent(
@@ -282,11 +285,9 @@ def _select_tools_for_first_turn(
         or (bool(image_urls) and is_image_edit_request(user_message_text, has_reference_image=True))
     )
     vision_or_visual_query = (
-        bool(image_urls) or _detect_visual_intent(user_message_text) or creation_visual_intent
+        bool(image_urls) or _detect_visual_intent(user_message_text) or creation_visual_intent or explicit_video_intent
     )
     effective_visual_intent = creation_visual_intent
-    explicit_video_intent = has_explicit_video_intent(user_message_text)
-    explicit_audio_intent = has_explicit_audio_intent(user_message_text)
 
     offer_light_decision_tools = _should_offer_light_decision(
         user_message_text,

@@ -114,6 +114,105 @@ def is_pure_video_generation_request(text: str | None) -> bool:
     return True
 
 
+# =============================================================================
+# Explicit intent gates for media creation (centralized with other keyword signals)
+# =============================================================================
+# These are the authoritative implementations. Re-exported from llm/media_tools.py
+# for compatibility with existing imports in tools/client.
+
+def has_explicit_video_intent(text: str | None) -> bool:
+    """
+    Detects clear user intent to generate a video.
+
+    Used for logging, continuation carryover, and ultra-light pure_video_gen routing —
+    NOT as the sole gate for offering generate_video on addressed turns (that follows
+    the same native pattern as generate_image: offered on light decision tools;
+    xAI / SuperGrok subscription limits apply at the API).
+    """
+    if not text:
+        return False
+    t = text.lower()
+
+    video_keywords = [
+        "haz un video", "hacé un video", "hace un video",
+        "genera un video", "generar un video", "generarme un video",
+        "generame un video", "generá un video", "generáme un video",
+        "crea un video", "crear un video", "crearme un video",
+        "creame un video", "creá un video",
+        "hazme un video", "haceme un video",
+        "quiero un video", "necesito un video",
+        "haz video", "genera video", "generar video", "crea video", "crear video",
+        "generame video", "creame video",
+        "video de esta", "video de la", "video de esto", "video de eso", "video de esa",
+        "video de la imagen", "video de la foto", "video de esa imagen",
+        "un video de", "un video con esta", "una video de", "una video con",
+        "anima esta", "anima la", "anima esto", "anima esa",
+        "convierte esta en video", "convierte la en video", "convierte en video",
+        "make a video", "generate a video", "create a video",
+        "animate this", "turn this into a video",
+    ]
+    if any(kw in t for kw in video_keywords):
+        return True
+
+    # Watching / consumption requests are not video-generation intent.
+    watch_patterns = (
+        "quiero ver", "quiero mirar", "ver un video", "ver videos", "ver el video",
+        "ver este video", "ver ese video", "mira el video", "mira un video",
+        "watch a video", "watch this video", "watch the video", "see a video",
+    )
+    if any(p in t for p in watch_patterns):
+        return False
+
+    # Robust fallback for typos / grammar slips ("una video", "generame una video", "genera video de una...")
+    # Common when users type fast in Spanish.
+    if "video" in t:
+        gen_hints = (
+            "genera", "generar", "crea", "crear", "haz", "generame", "generarme",
+            "creame", "crearme", "hazme", "quiero un", "necesito un", "podrias generar",
+            "podrías generar", "puedes generar", "me podrias", "me podrías",
+            "make a", "generate a", "create a",
+        )
+        if any(g in t for g in gen_hints):
+            # Avoid turning analysis, search, or watch requests into video intent
+            bad = ("qué ves", "que ves", "analiza", "describe", "qué es el video", "busca video", "quiero ver", "ver un video", "ver videos")
+            if not any(b in t for b in bad):
+                return True
+
+    return False
+
+
+def has_explicit_audio_intent(text: str | None) -> bool:
+    """
+    Detects clear user requests for text-to-speech / audio generation.
+    Examples: "léelo en voz alta", "genera audio de esto", "dilo en voz", "lee esto", "tts", etc.
+    Used as a hard gate (like video) so the tool is only offered on explicit requests.
+    """
+    if not text:
+        return False
+    t = text.lower()
+
+    audio_keywords = [
+        "léelo en voz alta", "lee en voz alta", "dilo en voz alta", "léelo", "léemelo",
+        "genera audio", "audio de", "convierte a audio", "texto a voz", "tts",
+        "dímelo en voz", "habla esto", "lee esto en voz", "en voz", "voz alta",
+        "genera el audio", "haz audio", "audio para", "narra", "pronuncia",
+        "read this out loud", "speak this", "text to speech", "generate audio",
+        "dilo", "léelo en voz", "haz que lo diga",
+    ]
+    if any(kw in t for kw in audio_keywords):
+        return True
+
+    # Fallback for combinations (e.g. "audio de este texto", "voz para esto")
+    if ("audio" in t or "voz" in t or "habla" in t or "lee" in t or "tts" in t):
+        gen_hints = ("genera", "crea", "haz", "quiero", "necesito", "dime", "lee", "dilo")
+        if any(g in t for g in gen_hints):
+            bad = ("busca audio", "música", "qué audio", "canción")
+            if not any(b in t for b in bad):
+                return True
+
+    return False
+
+
 def needs_breadth_grounding(text: str | None) -> bool:
     """Light signal that a query likely benefits from broad, multi-option coverage.
 
@@ -281,11 +380,24 @@ def is_image_edit_request(text: str | None, *, has_reference_image: bool = False
 
 
 def _detect_image_creation_intent(text: str | None, *, has_reference_image: bool = False) -> bool:
-    """Light detector for image creation OR edit intent (compat surface)."""
+    """
+    Light detector for image (or video-from-image) creation / edit intent.
+
+    This feeds has_visual_intent for offering heavy or full media schemas.
+    Per design and docstrings, video-from-img (I2V on addressed ref) counts as
+    creation intent so that video is offered with the same weight and paths
+    as image creation (full schemas on creation signal, parity on addressed light).
+    """
     try:
         if is_pure_image_generation_request(text):
             return True
-        return is_image_edit_request(text, has_reference_image=has_reference_image)
+        if is_image_edit_request(text, has_reference_image=has_reference_image):
+            return True
+        if has_reference_image and has_explicit_video_intent(text):
+            # I2V on a media referent is a creation/transform action; treat as visual
+            # creation for tool selection parity with generate_image/edit_image.
+            return True
+        return False
     except Exception:
         return False
 
