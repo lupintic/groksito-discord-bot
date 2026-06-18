@@ -128,23 +128,22 @@ def build_image_caption(prompt: str | None = None) -> str:
         short_desc = short_desc[:67].rstrip() + "…"
 
     options = [
-        f"Acá tenés {short_desc}." if short_desc else "Acá tenés la imagen.",
-        "Ahí va.",
-        f"Generé {short_desc}." if short_desc else "Listo.",
+        f"Aquí tienes {short_desc}." if short_desc else "Aquí tienes la imagen.",
+        f"Generé {short_desc}." if short_desc else "Imagen generada.",
         "Listo.",
-        "Acá tenés la imagen que pediste.",
-        f"{short_desc}." if short_desc else "Acá está.",
+        "Aquí tienes la imagen que pediste.",
+        f"{short_desc}." if short_desc else "Aquí está.",
     ]
     return random.choice(options)
 
 
 def build_edit_caption() -> str:
-    return "Acá tenés la versión editada."
+    return "Aquí tienes la versión editada."
 
 
 def build_video_caption(*, from_image: bool, duration: int) -> str:
     mode_label = "a partir de la imagen de referencia" if from_image else "generado"
-    return f"Acá tenés el video {mode_label}. (480p, {duration}s)"
+    return f"Aquí tienes el video {mode_label}. (480p, {duration}s)"
 
 
 def _guess_filename(url: str, kind: str, index: int = 0) -> str:

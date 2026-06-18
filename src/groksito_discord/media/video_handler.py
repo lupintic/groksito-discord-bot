@@ -13,7 +13,7 @@ Key modernizations (following the image pattern):
 - Unified auth, HTTP, retry, and long-running polling logic.
 - First-class **extra_params support for future API fields (motion_strength, etc.).
 - Robust error handling for the longer video generation lifecycle (start + poll).
-- Natural, consistent user-facing messages (matching image delivery style: "Acá tenés...").
+- Natural, consistent user-facing messages (matching image delivery style: neutral Spanish captions).
 - Direct delivery via image_delivery (register + consume + reply) for natural "typing..." UX.
 - I2V aspect ratio inferred from the reference image (avoids model guessing 16:9 on portrait/square art).
 - No bot-side daily caps — SuperGrok / xAI subscription limits apply (Grok web parity).
@@ -395,7 +395,7 @@ async def _tool_generate_video(
     - Always calls _enhance_video_prompt() for better Spanish + motion results.
     - **extra_params passed through (motion_strength, etc.).
     - Improved transient retry + clear error messages.
-    - Natural delivery text consistent with the image system ("Acá tenés el video...").
+    - Natural delivery text consistent with the image system (neutral Spanish captions).
     """
     api_key = _resolve_api_key()
     if not api_key:

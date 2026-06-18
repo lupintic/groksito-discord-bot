@@ -54,6 +54,13 @@ class TestSystemPromptCompleteness:
         assert "balance extra completeness with accuracy" in lowered
         assert "1-2 key facts" not in lowered
 
+    def test_prompt_includes_grok_voice_guidance(self):
+        """SYSTEM_PROMPT must enforce neutral Grok voice, not regional dialect (#110)."""
+        lowered = SYSTEM_PROMPT.lower()
+        assert "xai" in lowered
+        assert "neutral" in lowered
+        assert "regional dialect" in lowered or "regional" in lowered
+
 
 class TestPromptSingleSourceOfTruth:
     def test_native_search_descriptions_imported_from_prompt_builder(self):
