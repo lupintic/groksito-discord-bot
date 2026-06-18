@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -48,12 +49,16 @@ def test_docs_avoid_stale_run_and_import_paths():
 
 
 def test_groksito_cli_check_exits_zero():
+    env = os.environ.copy()
+    env.setdefault("DISCORD_BOT_TOKEN", "ci-test-discord-token")
+    env.setdefault("XAI_API_KEY", "ci-test-xai-api-key")
     result = subprocess.run(
         [sys.executable, "-m", "groksito_discord", "--check"],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
