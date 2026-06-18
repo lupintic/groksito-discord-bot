@@ -565,8 +565,9 @@ def get_tools_for_request(
       whether/when to actually invoke via its judgment + improved tool descriptions + SYSTEM_PROMPT.
       No keyword forcing of calls — only schema presence for the specialized tool.
     - Only explicit *creation* visual needs (has_visual_intent) get the heavy gen/edit schemas (rich alone does not force extra tools).
-      has_visual_intent is now strict (clear gen/edit/transform signals); presence of images in a reply
-      no longer auto-offers generate_image/edit_image (fixes mixed-signal token bloat).
+      has_visual_intent is now strict (clear gen/edit/transform signals, *including video-from-image/I2V* via updated detector);
+      presence of images in a reply no longer auto-offers heavy unless creation signal (fixes mixed-signal token bloat).
+      On addressed turns light decision tools + tinies ensure native video offering parity with image (let Grok decide, no sole keyword gate).
     - The ultra-minimal SYSTEM_PROMPT + zero/minimal context = closest possible to native Grok.
     """
     if is_tool_continuation:
@@ -641,6 +642,8 @@ def get_tools_for_request(
         # Offer image + video generation (tiny schemas) + edit on addressed turns so Grok can
         # *natively* reason about media creation — same pattern as Grok web (model decides;
         # no keyword gate for tool availability; xAI subscription limits apply at the API).
+        # Video is offered identically to image (via light block + explicit path); I2V now also
+        # triggers has_visual for full schema parity.
         if not has_visual_intent:
             try:
                 tools.append(_generate_image_schema_tiny())

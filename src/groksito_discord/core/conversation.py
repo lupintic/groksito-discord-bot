@@ -54,6 +54,8 @@ async def _resolve_referenced_and_activation(
     """
     Determines activation intent and fetches the referenced message if present.
     Returns: (referenced_message, is_reply_to_bot, explicit_visual_reply_intent, is_reply_continuation, has_x_link_intent, has_image_creation_intent)
+    # has_image_creation_intent now covers video-from-img (I2V) to ensure generate_video is offered
+    # with equivalent weight/paths to generate_image on ref + creation requests.
 
     ACTIVATION POLICY (strict):
     - Direct @mention → activate
@@ -491,7 +493,7 @@ async def _invoke_groksito(
     is_reply_continuation: bool = False,
     has_x_link_intent: bool = False,  # signal that user is asking about links/X posts in the reply
     is_reply_to_bot: bool = False,    # Direct reply to one of our previous messages (affects some context decisions)
-    has_image_creation_intent: bool = False,  # STRICT: only gen/edit/transform commands; controls heavy media tool schemas
+    has_image_creation_intent: bool = False,  # STRICT: gen/edit/transform + video-from-img (I2V); controls heavy schemas + visual flag for parity with image/audio offering patterns
     is_mentioned: bool = False,       # Direct mention of the bot (affects [R:] ref injection + light decision tool offering for on-demand recent context)
 ) -> None:
     """
@@ -543,7 +545,8 @@ async def _invoke_groksito(
 
     try:
         # Real call to the LLM layer (now connected to xAI Responses API + tools).
-        # We pass has_image_creation_intent (strict) for media tool offering; images for vision are handled separately.
+        # We pass has_image_creation_intent (strict; now includes video-from-ref for offering parity)
+        # for media tool offering; images for vision are handled separately.
         response_text = await call_grok_with_tools(
             user_message=user_message,
             author_name=author_display,
