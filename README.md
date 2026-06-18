@@ -110,6 +110,20 @@ docker compose run --rm groksito-discord-bot --login-oauth --print-url-only
 
 Access the dashboard at http://localhost:8010 (or the port you mapped).
 
+#### Pre-built images (GHCR)
+
+Released versions are published automatically to [GitHub Container Registry](https://github.com/lupintic/groksito-discord-bot/pkgs/container/groksito-discord-bot):
+
+```bash
+docker pull ghcr.io/lupintic/groksito-discord-bot:0.2.0
+docker pull ghcr.io/lupintic/groksito-discord-bot:latest
+docker pull ghcr.io/lupintic/groksito-discord-bot-web:0.2.0
+```
+
+Pin to a specific commit with `sha-<short>` tags (for example `sha-d645292`). Pre-release tags (`v0.3.0-rc1`, etc.) publish version tags but not `:latest`.
+
+To run pre-built images with compose, uncomment the `image:` lines in `docker-compose.yml` and comment out the matching `build:` blocks.
+
 ## 📖 Usage
 
 - Mention `@Groksito` or reply directly to the bot → it activates.
