@@ -8,6 +8,9 @@
 services:
   groksito-discord-bot:
     # Pre-built GHCR image (uncomment and comment out `build:` to skip local builds):
+    # Latest pre-release (e.g. 0.2.0-pre.1):
+    # image: ghcr.io/lupintic/groksito-discord-bot:0.2.0-pre.1
+    # Stable latest (only published for non-pre-release tags):
     # image: ghcr.io/lupintic/groksito-discord-bot:latest
     build:
       context: .
@@ -53,7 +56,8 @@ services:
 
   web:
     # Pre-built GHCR image (uncomment and comment out `build:` to skip local builds):
-    # image: ghcr.io/lupintic/groksito-discord-bot-web:latest
+    # Latest pre-release (e.g. 0.2.0-pre.1; web images use version tags only):
+    # image: ghcr.io/lupintic/groksito-discord-bot-web:0.2.0-pre.1
     build:
       context: .
       dockerfile: Dockerfile
