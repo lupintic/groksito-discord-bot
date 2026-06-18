@@ -179,18 +179,20 @@ def _build_emoji_block_if_addressed(
         from ..utils import emoji_registry
 
         gid = None
+        guild_obj = None
         try:
             if original_message and getattr(original_message, "guild", None):
-                gid = getattr(original_message.guild, "id", None)
+                guild_obj = original_message.guild
+                gid = getattr(guild_obj, "id", None)
         except Exception:
             pass
 
-        # Compact header chosen for cache efficiency (stable text, low tokens).
-        # Full varying list (by usage + descs) was a major source of divergence
-        # after the SYSTEM_PROMPT prefix on every addressed first turn.
-        emoji_compact_block = emoji_registry.get_emoji_compact_header(gid)
+        # Now uses top ~8 most-used by real usage (with short descs so model knows when to use).
+        # Strictly for current server only. Live guild_obj ensures current emotes + correct IDs.
+        # Lightweight and gated to addressed turns.
+        emoji_compact_block = emoji_registry.get_emoji_compact_header(gid, guild_obj=guild_obj)
         if emoji_compact_block:
-            logger.debug(f"{cid_prefix()}[CONTEXT] Injected compact server emoji header (addressed turn)")
+            logger.debug(f"{cid_prefix()}[CONTEXT] Injected server emote knowledge (top used for this guild, addressed turn)")
         return emoji_compact_block
     except Exception as emoji_ctx_err:
         logger.debug(f"{cid_prefix()}[Emoji] emoji prompt injection skipped (non-fatal): {emoji_ctx_err}")
