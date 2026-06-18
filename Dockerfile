@@ -31,6 +31,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # -----------------------------------------------------------------------------
 FROM base AS bot
 
+ARG IMAGE_VERSION=dev
+ARG IMAGE_REVISION=unknown
+ARG IMAGE_TARGET=bot
+
+LABEL org.opencontainers.image.title="groksito-discord-bot" \
+      org.opencontainers.image.description="Standalone Groksito Discord Bot (Discord agent + media tools)" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.source="https://github.com/lupintic/groksito-discord-bot" \
+      org.opencontainers.image.licenses="MIT"
+
 # System dependencies required only by the bot:
 # - ffmpeg: audio (pydub) and video handling
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -66,6 +77,17 @@ CMD ["groksito"]
 # Web stage — slim dashboard-only image (FastAPI + the modules it actually uses)
 # -----------------------------------------------------------------------------
 FROM base AS web
+
+ARG IMAGE_VERSION=dev
+ARG IMAGE_REVISION=unknown
+ARG IMAGE_TARGET=web
+
+LABEL org.opencontainers.image.title="groksito-discord-bot-web" \
+      org.opencontainers.image.description="Groksito FastAPI configuration dashboard (web target)" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.source="https://github.com/lupintic/groksito-discord-bot" \
+      org.opencontainers.image.licenses="MIT"
 
 # Web-only minimal dependencies.
 # See requirements-web.txt for the explicit list and rationale.

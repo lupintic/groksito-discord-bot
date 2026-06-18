@@ -7,6 +7,8 @@
 
 services:
   groksito-discord-bot:
+    # Pre-built GHCR image (uncomment and comment out `build:` to skip local builds):
+    # image: ghcr.io/lupintic/groksito-discord-bot:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -50,6 +52,8 @@ services:
     #   retries: 3
 
   web:
+    # Pre-built GHCR image (uncomment and comment out `build:` to skip local builds):
+    # image: ghcr.io/lupintic/groksito-discord-bot-web:latest
     build:
       context: .
       dockerfile: Dockerfile

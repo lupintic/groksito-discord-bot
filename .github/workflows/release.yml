@@ -77,13 +77,40 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
+      - name: Docker meta (bot)
+        id: meta_bot
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=sha,prefix=sha-,format=short
+
       - name: Build and push bot image (full Discord bot)
         uses: docker/build-push-action@v6
         with:
           context: .
           target: bot
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta_bot.outputs.tags }}
+          labels: ${{ steps.meta_bot.outputs.labels }}
+          build-args: |
+            IMAGE_VERSION=${{ steps.meta.outputs.version }}
+            IMAGE_REVISION=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Docker meta (web)
+        id: meta_web
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-web
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=sha,prefix=sha-,format=short
 
       - name: Build and push web image (dashboard only)
         uses: docker/build-push-action@v6
@@ -91,13 +118,9 @@ jobs:
           context: .
           target: web
           push: true
-          tags: ghcr.io/${{ github.repository }}-web:${{ steps.meta.outputs.version }}
-
-      - name: Also tag :latest for stable releases (bot)
-        if: ${{ !contains(github.ref_name, '-') }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: bot
-          push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: ${{ steps.meta_web.outputs.tags }}
+          labels: ${{ steps.meta_web.outputs.labels }}
+          build-args: |
+            IMAGE_VERSION=${{ steps.meta.outputs.version }}
+            IMAGE_REVISION=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
