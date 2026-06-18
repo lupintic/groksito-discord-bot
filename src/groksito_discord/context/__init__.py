@@ -1,13 +1,11 @@
 """
-Context package for Groksito.
+Context package for Groksito short-term *channel* history.
 
-Public API is re-exported here from .core (implementation) and .context_summarizer.
+Persists per-channel message buffers and optional channel summaries only.
+Per-user memory was removed in #112 — see ``core.py`` module docstring for details.
 
-Public API re-exported from core.py (state, persistence).
-
-Import-time side effects (context load) still occur on first import of the
-package (via core), but are now contained. Callers using `from . import context`
-or `from .context import ...` continue to work unchanged.
+Public API is re-exported from ``.core`` and ``.context_summarizer``.
+Import-time load/save side effects occur on first package import (via core).
 """
 
 from __future__ import annotations
