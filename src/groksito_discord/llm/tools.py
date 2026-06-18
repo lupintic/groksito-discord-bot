@@ -26,6 +26,16 @@ from typing import Any
 
 from ..utils.correlation import cid_prefix
 
+from .prompt_builder import (
+    EDIT_IMAGE_TOOL_DESCRIPTION,
+    GENERATE_IMAGE_TOOL_INTRO,
+    GENERATE_IMAGE_TOOL_INTRO_TINY,
+    IMAGE_PERMISSIVE_RULE_FULL,
+    IMAGE_PERMISSIVE_RULE_TINY,
+    TOOL_RESULT_REPLY_SENT,
+    infer_custom_tools_set_name,
+)
+
 from .. import context
 from ..media.delivery import register_image_request, consume_image_request
 from .media_tools import (
@@ -52,16 +62,7 @@ def _generate_image_schema() -> dict:
     return {
         "type": "function",
         "name": "generate_image",
-        "description": (
-            "Generate an image using Grok Imagine (grok-imagine-image). Best for explicit user requests to create or visualize a scene, character, or concept.\n\n"
-            "**PERMISSIVE RULE FOR SUGGESTIVE CONTENT (fantasy/anime style - Grok-native):**\n"
-            "The API allows quite suggestive content in stylized styles: curvy, busty, tetona, culona, sexy, voluptuous, bikini, lingerie, tight dress, sexy pose, etc.\n\n"
-            "- **Allow and preserve the essence** for 'chica tetona en bikini', 'waifu culona gótica', 'sexy curvy en lencería', 'busty micro bikini', 'sexy pose', 'voluptuous'. Keep curves/bust/hips/pose/revealing clothing (no explicit). NO to generic 'elegant'.\n"
-            "- **ONLY reformulate** on probable hard block: full nude/desnuda/naked (sexual), explicit genitals in act (pussy/cock/penis), explicit sex (follar/penetración/blowjob), 'spread legs' porn, ultra-vulgar that leads to explicit porn.\n"
-            "- Goal: **as close as possible** to the request (even if very curvy/busty/sexy or 'ridiculous'), always without explicit nude or sexual act.\n\n"
-            "Examples: 'chica tetona en bikini' → 'busty tetona girl in sexy bikini, curvy, wide hips...'; 'zero two culona sexy' → keep 'curvy culona figure, sexy gothic...'.\n\n"
-            "Silent retry only for hard safety cases; user NEVER sees meta about 'explicit prompt'."
-        ),
+        "description": f"{GENERATE_IMAGE_TOOL_INTRO}{IMAGE_PERMISSIVE_RULE_FULL}",
         "parameters": {
             "type": "object",
             "properties": {
@@ -79,10 +80,7 @@ def _generate_image_schema_tiny() -> dict:
     return {
         "type": "function",
         "name": "generate_image",
-        "description": (
-            "Generate image (ultra-light mode for pure creation requests).\n"
-            "**PERMISSIVE RULE:** For suggestive fantasy 'tetona en bikini', 'culona sexy', 'sexy curvy', 'busty en lencería' → PASS AS CLOSE AS POSSIBLE (keep 'busty','curvy','sexy','tetona','culona',bikini/lingerie). Only reformulate on full nude/explicit sex/explicit genitals. API allows lots of suggestive anime/fantasy. User never sees filter meta."
-        ),
+        "description": f"{GENERATE_IMAGE_TOOL_INTRO_TINY}{IMAGE_PERMISSIVE_RULE_TINY}",
         "parameters": {
             "type": "object",
             "properties": {
@@ -99,13 +97,7 @@ def _edit_image_schema() -> dict:
     return {
         "type": "function",
         "name": "edit_image",
-        "description": (
-            "Edit or transform the user's attached/reference image(s). REQUIRED when the user asks to modify, "
-            "retouch, or restyle an uploaded or referenced photo (hair, makeup, clothing, mood, background, etc.). "
-            "Reference images are already available from the user's message — call this tool with the transformation "
-            "prompt. Do NOT claim an edited image is ready without calling this tool; successful calls deliver the "
-            "result as a Discord attachment automatically."
-        ),
+        "description": EDIT_IMAGE_TOOL_DESCRIPTION,
         "parameters": {
             "type": "object",
             "properties": {
@@ -178,7 +170,7 @@ async def execute_hybrid_tool(
                     pass
                 # Clean result for the model. LLM layer will set suppression flag
                 # so conversation.py does not send a duplicate final reply.
-                return "Message sent directly to the user."
+                return TOOL_RESULT_REPLY_SENT
             return content
 
         if name == "react_to_message":
@@ -496,19 +488,11 @@ def log_tool_selection(
     custom_names = [t.get("name", t.get("type", "?")) for t in custom_tools]
     custom_count = len(custom_names)
 
-    # Determine a human-readable "set" name for easier filtering
-    if turn_type == "continuation":
-        set_name = "continuation-minimal"
-        if has_visual_intent:
-            set_name = "continuation-visual"
-    elif query_need == "casual":
-        set_name = "casual-none"
-    elif query_need == "minimal":
-        set_name = "minimal-core"
-    elif query_need == "rich":
-        set_name = "rich"
-    else:
-        set_name = "normal"
+    set_name = infer_custom_tools_set_name(
+        query_need,
+        has_visual_intent,
+        turn_type == "continuation",
+    )
 
     # Approximate schema size (custom + native separately now, since native can be conditional web/x)
     try:

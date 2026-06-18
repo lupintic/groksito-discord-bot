@@ -19,6 +19,11 @@ import httpx
 
 from ..utils.correlation import cid_prefix
 from ..config import settings
+from ..llm.prompt_builder import (
+    DIRECT_DELIVERY_SUCCESS_EDIT,
+    DIRECT_DELIVERY_SUCCESS_IMAGE,
+    DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK,
+)
 from .delivery import (
     _download_url,
     build_edit_caption,
@@ -512,7 +517,7 @@ async def _tool_generate_image(
                                     except Exception:
                                         pass
                                     logger.info(f"{cid_prefix()}[ImageDelivery] Direct clean policy message for generate {request_id}")
-                                    return "SUCCESS: Image generation policy blocked; clean direct message delivered to the user."
+                                    return DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK
                             except Exception as dir_err:
                                 logger.warning(f"{cid_prefix()}[ImageDelivery] Direct policy delivery failed: {dir_err}")
 
@@ -539,7 +544,7 @@ async def _tool_generate_image(
                 if request_id and await deliver_from_request(
                     request_id, caption=caption, urls=urls, kind="image"
                 ):
-                    return "SUCCESS: Image(s) generated and delivered directly to the user."
+                    return DIRECT_DELIVERY_SUCCESS_IMAGE
 
                 return f"Image URLs ready:\n{urls_block}"
 
@@ -723,7 +728,7 @@ async def _tool_edit_image(
             return "Could not generate the edited images (empty response)."
 
         if await _try_direct_edit_delivery(request_id, urls):
-            return "SUCCESS: Edited image(s) delivered directly to the user."
+            return DIRECT_DELIVERY_SUCCESS_EDIT
 
         return (
             "EDIT_URLS_READY (direct Discord delivery failed). "

@@ -36,6 +36,11 @@ import httpx
 
 from ..utils.correlation import cid_prefix
 from ..config import settings
+from ..llm.prompt_builder import (
+    DIRECT_DELIVERY_SUCCESS_VIDEO,
+    VIDEO_TOOL_DESCRIPTION_FULL,
+    VIDEO_TOOL_DESCRIPTION_TINY,
+)
 from .delivery import build_video_caption, deliver_from_request, register_image_request
 
 # Bearer (OAuth preferred)
@@ -314,13 +319,7 @@ def _generate_video_schema() -> dict:
     return {
         "type": "function",
         "name": "generate_video",
-        "description": (
-            "Generate a short video clip (grok-imagine-video, 480p, max 6s). "
-            "Supports text-to-video or image-to-video from a reference image in context (attached or from replied message). "
-            "MUST be called for any user request like 'genera un video', 'haz video de la imagen', 'animate this', etc. "
-            "NEVER describe the generation in text or claim it is happening — invoke the tool and let automatic delivery handle the attachment. "
-            "For image-to-video, omit aspect_ratio (inferred from reference). "
-        ),
+        "description": VIDEO_TOOL_DESCRIPTION_FULL,
         "parameters": {
             "type": "object",
             "properties": {
@@ -348,12 +347,7 @@ def _generate_video_schema_tiny() -> dict:
     return {
         "type": "function",
         "name": "generate_video",
-        "description": (
-            "Generate a short video clip (grok-imagine-video, 480p, max 6s). Use for text-to-video or image-to-video (when a reference image from the message or reply is provided in context). "
-            "Call this whenever the user explicitly asks to generate, make, create, animate, or convert an image to video. "
-            "You MUST call this tool instead of describing or pretending to generate the video in text. "
-            "Omit aspect_ratio for image-to-video (reference image drives framing). Delivery of the result is handled automatically."
-        ),
+        "description": VIDEO_TOOL_DESCRIPTION_TINY,
         "parameters": {
             "type": "object",
             "properties": {
@@ -580,7 +574,7 @@ async def _tool_generate_video(
                 f"{cid_prefix()}[MediaDelivery] Video delivered as attachment for request {request_id} "
                 f"(xAI id: {xai_video_id})"
             )
-            return "SUCCESS: Video successfully generated and delivered directly to the user."
+            return DIRECT_DELIVERY_SUCCESS_VIDEO
 
         return f"Video generated successfully:\n{video_url}"
 
