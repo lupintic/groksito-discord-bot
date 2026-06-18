@@ -26,6 +26,7 @@ from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionEr
 
 from ..config import settings
 from ..media.delivery import DIRECT_DELIVERY_PERFORMED
+from .prompt_builder import DIRECT_DELIVERY_DETECTOR_PHRASES
 from .tools import (
     get_tools_for_request,
     log_tool_selection,
@@ -98,16 +99,7 @@ _CONTINUATION_NO_SEARCH_REOFFER_TOOLS = frozenset({
     *MEDIA_ACTION_TOOLS,
 })
 
-_DIRECT_DELIVERY_SUCCESS_PHRASES = (
-    "success: image(s) generated and delivered directly",
-    "success: edited image(s) delivered directly",
-    "success: audio generated and delivered directly",
-    "success: video successfully generated and delivered directly",
-    "delivered directly to the user",
-    "clean direct message delivered to the user",
-    "policy blocked; clean direct message delivered",
-    "message sent directly to the user",
-)
+_DIRECT_DELIVERY_SUCCESS_PHRASES = DIRECT_DELIVERY_DETECTOR_PHRASES
 
 
 def _is_direct_delivery_success(result_str: str, tool_name: str, cid_p: str) -> bool:

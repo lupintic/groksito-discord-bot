@@ -26,7 +26,11 @@ from openai import (
 )
 
 from ..config import settings
-from .prompt_builder import SUMMARIZATION_PROMPT, get_native_search_descriptions
+from .prompt_builder import (
+    SUMMARIZATION_PROMPT,
+    get_native_search_descriptions,
+    infer_custom_tools_set_name,
+)
 from ..context import (
     get_estimated_history_tokens,
     get_messages_for_summarization,
@@ -165,15 +169,7 @@ def _infer_tools_set_name(
     query_need: str, has_visual_intent: bool, is_continuation: bool
 ) -> str:
     """Produces a short, consistent label for the custom tool set used (for logging)."""
-    if is_continuation:
-        return "continuation-visual" if has_visual_intent else "continuation-minimal"
-    if query_need == "casual":
-        return "casual-none"
-    if query_need == "minimal":
-        return "minimal-core"
-    if query_need == "rich":
-        return "rich"
-    return "normal"
+    return infer_custom_tools_set_name(query_need, has_visual_intent, is_continuation)
 
 
 def _extract_and_log_token_usage(

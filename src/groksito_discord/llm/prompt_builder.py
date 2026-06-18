@@ -151,6 +151,117 @@ X_SEARCH_STANDARD_DESCRIPTION = (
 )
 
 
+# =============================================================================
+# Direct delivery + tool result strings (single source for media handlers + client)
+# =============================================================================
+
+DIRECT_DELIVERY_SUCCESS_IMAGE = (
+    "SUCCESS: Image(s) generated and delivered directly to the user."
+)
+DIRECT_DELIVERY_SUCCESS_EDIT = (
+    "SUCCESS: Edited image(s) delivered directly to the user."
+)
+DIRECT_DELIVERY_SUCCESS_VIDEO = (
+    "SUCCESS: Video successfully generated and delivered directly to the user."
+)
+DIRECT_DELIVERY_SUCCESS_AUDIO = (
+    "SUCCESS: Audio generated and delivered directly to the user."
+)
+DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK = (
+    "SUCCESS: Image generation policy blocked; clean direct message delivered to the user."
+)
+
+TOOL_RESULT_REPLY_SENT = "Message sent directly to the user."
+
+DIRECT_DELIVERY_DETECTOR_PHRASES = (
+    "success: image(s) generated and delivered directly",
+    "success: edited image(s) delivered directly",
+    "success: audio generated and delivered directly",
+    "success: video successfully generated and delivered directly",
+    "delivered directly to the user",
+    "clean direct message delivered to the user",
+    "policy blocked; clean direct message delivered",
+    "message sent directly to the user",
+)
+
+# =============================================================================
+# Media tool schema guidance (imported by tools.py + media handlers)
+# =============================================================================
+
+DISCORD_ATTACHMENT_AUTO_DELIVERY = (
+    "Do NOT claim an edited image is ready without calling this tool; successful calls deliver the "
+    "result as a Discord attachment automatically."
+)
+
+IMAGE_PERMISSIVE_RULE_FULL = (
+    "**PERMISSIVE RULE FOR SUGGESTIVE CONTENT (fantasy/anime style - Grok-native):**\n"
+    "The API allows quite suggestive content in stylized styles: curvy, busty, tetona, culona, sexy, voluptuous, bikini, lingerie, tight dress, sexy pose, etc.\n\n"
+    "- **Allow and preserve the essence** for 'chica tetona en bikini', 'waifu culona gótica', 'sexy curvy en lencería', 'busty micro bikini', 'sexy pose', 'voluptuous'. Keep curves/bust/hips/pose/revealing clothing (no explicit). NO to generic 'elegant'.\n"
+    "- **ONLY reformulate** on probable hard block: full nude/desnuda/naked (sexual), explicit genitals in act (pussy/cock/penis), explicit sex (follar/penetración/blowjob), 'spread legs' porn, ultra-vulgar that leads to explicit porn.\n"
+    "- Goal: **as close as possible** to the request (even if very curvy/busty/sexy or 'ridiculous'), always without explicit nude or sexual act.\n\n"
+    "Examples: 'chica tetona en bikini' → 'busty tetona girl in sexy bikini, curvy, wide hips...'; 'zero two culona sexy' → keep 'curvy culona figure, sexy gothic...'.\n\n"
+    "Silent retry only for hard safety cases; user NEVER sees meta about 'explicit prompt'."
+)
+
+IMAGE_PERMISSIVE_RULE_TINY = (
+    "**PERMISSIVE RULE:** For suggestive fantasy 'tetona en bikini', 'culona sexy', 'sexy curvy', 'busty en lencería' → PASS AS CLOSE AS POSSIBLE (keep 'busty','curvy','sexy','tetona','culona',bikini/lingerie). Only reformulate on full nude/explicit sex/explicit genitals. API allows lots of suggestive anime/fantasy. User never sees filter meta."
+)
+
+GENERATE_IMAGE_TOOL_INTRO = (
+    "Generate an image using Grok Imagine (grok-imagine-image). "
+    "Best for explicit user requests to create or visualize a scene, character, or concept.\n\n"
+)
+
+GENERATE_IMAGE_TOOL_INTRO_TINY = (
+    "Generate image (ultra-light mode for pure creation requests).\n"
+)
+
+EDIT_IMAGE_TOOL_DESCRIPTION = (
+    "Edit or transform the user's attached/reference image(s). REQUIRED when the user asks to modify, "
+    "retouch, or restyle an uploaded or referenced photo (hair, makeup, clothing, mood, background, etc.). "
+    "Reference images are already available from the user's message — call this tool with the transformation "
+    f"prompt. {DISCORD_ATTACHMENT_AUTO_DELIVERY}"
+)
+
+VIDEO_TOOL_DELIVERY_NOTE = (
+    "NEVER describe the generation in text or claim it is happening — invoke the tool and let automatic "
+    "delivery handle the attachment."
+)
+
+VIDEO_TOOL_DESCRIPTION_FULL = (
+    "Generate a short video clip (grok-imagine-video, 480p, max 6s). "
+    "Supports text-to-video or image-to-video from a reference image in context (attached or from replied message). "
+    "MUST be called for any user request like 'genera un video', 'haz video de la imagen', 'animate this', etc. "
+    f"{VIDEO_TOOL_DELIVERY_NOTE} "
+    "For image-to-video, omit aspect_ratio (inferred from reference). "
+)
+
+VIDEO_TOOL_DESCRIPTION_TINY = (
+    "Generate a short video clip (grok-imagine-video, 480p, max 6s). Use for text-to-video or image-to-video "
+    "(when a reference image from the message or reply is provided in context). "
+    "Call this whenever the user explicitly asks to generate, make, create, animate, or convert an image to video. "
+    "You MUST call this tool instead of describing or pretending to generate the video in text. "
+    "Omit aspect_ratio for image-to-video (reference image drives framing). Delivery of the result is handled automatically."
+)
+
+
+def infer_custom_tools_set_name(
+    query_need: str,
+    has_visual_intent: bool,
+    is_continuation: bool,
+) -> str:
+    """Single source for custom tool set labels (logging + metrics)."""
+    if is_continuation:
+        return "continuation-visual" if has_visual_intent else "continuation-minimal"
+    if query_need == "casual":
+        return "casual-none"
+    if query_need == "minimal":
+        return "minimal-core"
+    if query_need == "rich":
+        return "rich"
+    return "normal"
+
+
 def get_native_search_descriptions(query_text: str) -> tuple[str, str]:
     """Return (web_search_description, x_search_description) for native tool schemas.
 

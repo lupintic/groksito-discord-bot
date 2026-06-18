@@ -29,6 +29,95 @@ def _normalize_query_text(text: str) -> str:
 
 
 # =============================================================================
+# Shared keyword groups (deduplicated across pure + explicit detectors)
+# =============================================================================
+
+_IMAGE_CREATION_POSITIVES = (
+    "genera una imagen", "generame una imagen", "genera imagen de",
+    "me generas una imagen", "me generás una imagen", "me genera una imagen",
+    "generame una imagen de", "genera una de",
+    "haz una imagen", "hazme una imagen", "hazme una imagen de",
+    "crea una imagen", "creame una imagen", "crea una imagen de",
+    "quiero una imagen", "quiero una imagen de", "quiero que generes una",
+    "dibuja un", "dibujame", "dibújame", "dibuja una imagen", "dibuja me una",
+    "pinta una", "pintame", "píntame",
+    "una imagen de un", "imagen de una", "imagen de el", "imagen de la",
+    "me generas un", "me generás un", "me genera un",
+    "generame un", "hazme un", "creame un", "dibujame un", "pintame un",
+    "genera un", "haz un", "crea un", "dibuja un", "pinta un",
+    "generate an image of", "draw a picture of", "make an image", "create a picture",
+    "generate me an image", "make me an image of", "draw me",
+    "genera una foto de", "haz un dibujo",
+)
+
+_IMAGE_CREATION_NEGATIVES = (
+    "esta ", "la imagen", "la foto", "referencia", "edit", "edita", "sobre esta",
+    "de esta", "analiza", "describe", "qué ves", "video", "anim",
+    "de la imagen", "de la foto", "de esta imagen", "sobre la imagen",
+)
+
+_VIDEO_CREATION_CORE = (
+    "haz un video", "hacé un video", "hace un video",
+    "genera un video", "generar un video", "generarme un video",
+    "generame un video", "generá un video", "generáme un video",
+    "crea un video", "crear un video", "crearme un video",
+    "creame un video", "creá un video",
+    "hazme un video", "haceme un video",
+    "quiero un video", "necesito un video",
+    "haz video", "genera video", "generar video", "crea video", "crear video",
+    "generame video", "creame video",
+    "un video de", "haz video de", "genera video de", "generar video de",
+    "make a video", "generate a video", "create a video",
+)
+
+_VIDEO_CREATION_I2V_EXTRA = (
+    "video de esta", "video de la", "video de esto", "video de eso", "video de esa",
+    "video de la imagen", "video de la foto", "video de esa imagen",
+    "un video con esta", "una video de", "una video con",
+    "anima esta", "anima la", "anima esto", "anima esa",
+    "convierte esta en video", "convierte la en video", "convierte en video",
+    "animate this", "turn this into a video",
+)
+
+_VIDEO_PURE_NEGATIVES = (
+    "esta imagen", "esta foto", "esa imagen", "esa foto",
+    "de esta", "de esa", "la imagen", "la foto", "referencia",
+    "analiza", "describe", "qué ves", "que ves", "qué es el video",
+    "quiero ver", "ver un video", "ver el video", "mira el video",
+    "edit", "edita", "imagen de",
+)
+
+_VIDEO_WATCH_NEGATIVES = (
+    "quiero ver", "quiero mirar", "ver un video", "ver videos", "ver el video",
+    "ver este video", "ver ese video", "mira el video", "mira un video",
+    "watch a video", "watch this video", "watch the video", "see a video",
+)
+
+_VIDEO_GEN_HINTS = (
+    "genera", "generar", "crea", "crear", "haz", "generame", "generarme",
+    "creame", "crearme", "hazme", "quiero un", "necesito un", "podrias generar",
+    "podrías generar", "puedes generar", "me podrias", "me podrías",
+    "make a", "generate a", "create a",
+)
+
+_VIDEO_EXPLICIT_BAD_CONTEXT = (
+    "qué ves", "que ves", "analiza", "describe", "qué es el video",
+    "busca video", "quiero ver", "ver un video", "ver videos",
+)
+
+_AUDIO_KEYWORDS = (
+    "léelo en voz alta", "lee en voz alta", "dilo en voz alta", "léelo", "léemelo",
+    "genera audio", "audio de", "convierte a audio", "texto a voz", "tts",
+    "dímelo en voz", "habla esto", "lee esto en voz", "en voz", "voz alta",
+    "genera el audio", "haz audio", "audio para", "narra", "pronuncia",
+    "read this out loud", "speak this", "text to speech", "generate audio",
+    "dilo", "léelo en voz", "haz que lo diga",
+)
+
+_AUDIO_GEN_HINTS = ("genera", "crea", "haz", "quiero", "necesito", "dime", "lee", "dilo")
+_AUDIO_BAD_CONTEXT = ("busca audio", "música", "qué audio", "canción")
+
+# =============================================================================
 # Essential light detectors (kept; no heavy keyword tables)
 # =============================================================================
 
@@ -45,33 +134,9 @@ def is_pure_image_generation_request(text: str | None) -> bool:
     # The word "imagen" is not required if the verb is a clear creation verb and no analysis/edit/video signals.
     # This detector is *only* for the ultra-light pure image_gen optimization path.
     # Tool availability for native reasoning is guaranteed via light decision tools + core tool protection.
-    positives = (
-        "genera una imagen", "generame una imagen", "genera imagen de",
-        "me generas una imagen", "me generás una imagen", "me genera una imagen",
-        "generame una imagen de", "genera una de",
-        "haz una imagen", "hazme una imagen", "hazme una imagen de",
-        "crea una imagen", "creame una imagen", "crea una imagen de",
-        "quiero una imagen", "quiero una imagen de", "quiero que generes una",
-        "dibuja un", "dibujame", "dibújame", "dibuja una imagen", "dibuja me una",
-        "pinta una", "pintame", "píntame",
-        "una imagen de un", "imagen de una", "imagen de el", "imagen de la",
-        # Bare creation-verb + subject (very common casual): "me generas un gato con botas", "genera un gato..."
-        "me generas un", "me generás un", "me genera un",
-        "generame un", "hazme un", "creame un", "dibujame un", "pintame un",
-        "genera un", "haz un", "crea un", "dibuja un", "pinta un",
-        "generate an image of", "draw a picture of", "make an image", "create a picture",
-        "generate me an image", "make me an image of", "draw me",
-        "genera una foto de", "haz un dibujo",
-    )
-    if not any(p in t for p in positives):
+    if not any(p in t for p in _IMAGE_CREATION_POSITIVES):
         return False
-    # Negatives: edits/refs/analysis/video signals -> not pure gen
-    negatives = (
-        "esta ", "la imagen", "la foto", "referencia", "edit", "edita", "sobre esta",
-        "de esta", "analiza", "describe", "qué ves", "video", "anim",
-        "de la imagen", "de la foto", "de esta imagen", "sobre la imagen",
-    )
-    if any(n in t for n in negatives):
+    if any(n in t for n in _IMAGE_CREATION_NEGATIVES):
         return False
     return True
 
@@ -87,29 +152,15 @@ def is_pure_video_generation_request(text: str | None) -> bool:
     if not text or len(text.strip()) < 5:
         return False
     t = text.lower()
-    positives = (
-        "genera un video", "generar un video", "generarme un video",
-        "generame un video", "generá un video", "generáme un video",
-        "haz un video", "hacé un video", "hace un video",
-        "hazme un video", "haceme un video",
-        "crea un video", "crear un video", "crearme un video",
-        "creame un video", "creá un video",
-        "quiero un video", "quiero que generes un video",
-        "necesito un video", "un video de un", "un video de una",
-        "haz video de", "genera video de", "generar video de",
+    pure_phrases = _VIDEO_CREATION_CORE + (
+        "quiero que generes un video",
+        "un video de un", "un video de una",
         "make a video of", "generate a video of", "create a video of",
         "animate a scene", "animate a ",
     )
-    if not any(p in t for p in positives):
+    if not any(p in t for p in pure_phrases):
         return False
-    negatives = (
-        "esta imagen", "esta foto", "esa imagen", "esa foto",
-        "de esta", "de esa", "la imagen", "la foto", "referencia",
-        "analiza", "describe", "qué ves", "que ves", "qué es el video",
-        "quiero ver", "ver un video", "ver el video", "mira el video",
-        "edit", "edita", "imagen de",
-    )
-    if any(n in t for n in negatives):
+    if any(n in t for n in _VIDEO_PURE_NEGATIVES):
         return False
     return True
 
@@ -133,49 +184,15 @@ def has_explicit_video_intent(text: str | None) -> bool:
         return False
     t = text.lower()
 
-    video_keywords = [
-        "haz un video", "hacé un video", "hace un video",
-        "genera un video", "generar un video", "generarme un video",
-        "generame un video", "generá un video", "generáme un video",
-        "crea un video", "crear un video", "crearme un video",
-        "creame un video", "creá un video",
-        "hazme un video", "haceme un video",
-        "quiero un video", "necesito un video",
-        "haz video", "genera video", "generar video", "crea video", "crear video",
-        "generame video", "creame video",
-        "video de esta", "video de la", "video de esto", "video de eso", "video de esa",
-        "video de la imagen", "video de la foto", "video de esa imagen",
-        "un video de", "un video con esta", "una video de", "una video con",
-        "anima esta", "anima la", "anima esto", "anima esa",
-        "convierte esta en video", "convierte la en video", "convierte en video",
-        "make a video", "generate a video", "create a video",
-        "animate this", "turn this into a video",
-    ]
-    if any(kw in t for kw in video_keywords):
+    if any(kw in t for kw in _VIDEO_CREATION_CORE + _VIDEO_CREATION_I2V_EXTRA):
         return True
 
-    # Watching / consumption requests are not video-generation intent.
-    watch_patterns = (
-        "quiero ver", "quiero mirar", "ver un video", "ver videos", "ver el video",
-        "ver este video", "ver ese video", "mira el video", "mira un video",
-        "watch a video", "watch this video", "watch the video", "see a video",
-    )
-    if any(p in t for p in watch_patterns):
+    if any(p in t for p in _VIDEO_WATCH_NEGATIVES):
         return False
 
-    # Robust fallback for typos / grammar slips ("una video", "generame una video", "genera video de una...")
-    # Common when users type fast in Spanish.
     if "video" in t:
-        gen_hints = (
-            "genera", "generar", "crea", "crear", "haz", "generame", "generarme",
-            "creame", "crearme", "hazme", "quiero un", "necesito un", "podrias generar",
-            "podrías generar", "puedes generar", "me podrias", "me podrías",
-            "make a", "generate a", "create a",
-        )
-        if any(g in t for g in gen_hints):
-            # Avoid turning analysis, search, or watch requests into video intent
-            bad = ("qué ves", "que ves", "analiza", "describe", "qué es el video", "busca video", "quiero ver", "ver un video", "ver videos")
-            if not any(b in t for b in bad):
+        if any(g in t for g in _VIDEO_GEN_HINTS):
+            if not any(b in t for b in _VIDEO_EXPLICIT_BAD_CONTEXT):
                 return True
 
     return False
@@ -191,23 +208,12 @@ def has_explicit_audio_intent(text: str | None) -> bool:
         return False
     t = text.lower()
 
-    audio_keywords = [
-        "léelo en voz alta", "lee en voz alta", "dilo en voz alta", "léelo", "léemelo",
-        "genera audio", "audio de", "convierte a audio", "texto a voz", "tts",
-        "dímelo en voz", "habla esto", "lee esto en voz", "en voz", "voz alta",
-        "genera el audio", "haz audio", "audio para", "narra", "pronuncia",
-        "read this out loud", "speak this", "text to speech", "generate audio",
-        "dilo", "léelo en voz", "haz que lo diga",
-    ]
-    if any(kw in t for kw in audio_keywords):
+    if any(kw in t for kw in _AUDIO_KEYWORDS):
         return True
 
-    # Fallback for combinations (e.g. "audio de este texto", "voz para esto")
     if ("audio" in t or "voz" in t or "habla" in t or "lee" in t or "tts" in t):
-        gen_hints = ("genera", "crea", "haz", "quiero", "necesito", "dime", "lee", "dilo")
-        if any(g in t for g in gen_hints):
-            bad = ("busca audio", "música", "qué audio", "canción")
-            if not any(b in t for b in bad):
+        if any(g in t for g in _AUDIO_GEN_HINTS):
+            if not any(b in t for b in _AUDIO_BAD_CONTEXT):
                 return True
 
     return False

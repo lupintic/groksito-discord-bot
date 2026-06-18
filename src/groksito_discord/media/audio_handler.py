@@ -32,6 +32,8 @@ from typing import Any, Optional
 import httpx
 import discord  # core dep; needed for voice message File subclass + MessageFlags
 
+from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_AUDIO
+
 # For reliable voice message delivery (flag + attachment metadata).
 # High-level reply(..., flags=...) is not always available / consistent even on 2.7.x
 # (as seen in container), so we prefer the low-level path using handle_message_parameters.
@@ -594,7 +596,7 @@ async def _tool_generate_audio(
                                 # and prevents duplicate messages) when we actually attached audio.
                                 if audio_attached:
                                     logger.info(f"{cid_prefix()}[AudioDelivery] Direct audio delivery successful for request {request_id}")
-                                    return "SUCCESS: Audio generated and delivered directly to the user."
+                                    return DIRECT_DELIVERY_SUCCESS_AUDIO
 
                                 # If we only managed to send a text note (very rare), fall through so the
                                 # generic fallback string is returned and the model can respond naturally.
