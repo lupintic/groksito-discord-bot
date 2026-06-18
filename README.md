@@ -4,6 +4,8 @@
 ![Discord](https://img.shields.io/badge/Discord-Bot-7289da.svg)
 ![xAI](https://img.shields.io/badge/xAI-Grok-ff6b6b.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
+[![Release](https://img.shields.io/github/v/release/lupintic/groksito-discord-bot?include_prereleases&sort=semver)](https://github.com/lupintic/groksito-discord-bot/releases)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Flupintic%2Fgroksito--discord--bot-blue?logo=docker)](https://github.com/lupintic/groksito-discord-bot/pkgs/container/groksito-discord-bot)
 
 **Groksito** is a standalone Discord bot that brings Grok (xAI) natively into Discord servers. It is a fully conversational experience powered directly by Grok models, with vision, tool use, and direct image/video/audio generation.
 
@@ -108,19 +110,28 @@ docker compose up web
 docker compose run --rm groksito-discord-bot --login-oauth --print-url-only
 ```
 
+> **Using pre-built images?** The examples above build locally. For pre-built GHCR images (including the latest pre-release), see the **Pre-built images (GHCR)** section below and enable the `image:` lines in `docker-compose.yml`.
+
 Access the dashboard at http://localhost:8010 (or the port you mapped).
 
 #### Pre-built images (GHCR)
 
-Released versions are published automatically to [GitHub Container Registry](https://github.com/lupintic/groksito-discord-bot/pkgs/container/groksito-discord-bot):
+Released versions (including pre-releases) are published automatically to [GitHub Container Registry](https://github.com/lupintic/groksito-discord-bot/pkgs/container/groksito-discord-bot).
+
+**Latest pre-release:**
 
 ```bash
-docker pull ghcr.io/lupintic/groksito-discord-bot:0.2.0
-docker pull ghcr.io/lupintic/groksito-discord-bot:latest
-docker pull ghcr.io/lupintic/groksito-discord-bot-web:0.2.0
+docker pull ghcr.io/lupintic/groksito-discord-bot:0.2.0-pre.1
+docker pull ghcr.io/lupintic/groksito-discord-bot-web:0.2.0-pre.1
 ```
 
-Pin to a specific commit with `sha-<short>` tags (for example `sha-d645292`). Pre-release tags (`v0.3.0-rc1`, etc.) publish version tags but not `:latest`.
+**Stable releases** also get a `:latest` tag (bot only):
+
+```bash
+docker pull ghcr.io/lupintic/groksito-discord-bot:latest
+```
+
+Pin to a specific commit with `sha-<short>` tags (for example `sha-d645292`). Pre-release tags publish version tags but **not** `:latest`.
 
 To run pre-built images with compose, uncomment the `image:` lines in `docker-compose.yml` and comment out the matching `build:` blocks.
 
