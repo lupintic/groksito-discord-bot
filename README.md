@@ -179,6 +179,8 @@ Contributions, bug reports, and feature ideas are welcome.
 
 See the full [CONTRIBUTING.md](./CONTRIBUTING.md) guide (development setup, philosophy, process, what not to do).
 
+Maintainers: see [RELEASE.md](./RELEASE.md) for the pre-release and stable release process (version bumps, tagging, GHCR publishing).
+
 We also maintain a [Code of Conduct](./CODE_OF_CONDUCT.md) and [Security Policy](./SECURITY.md).
 
 Quick summary:

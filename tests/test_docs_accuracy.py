@@ -67,3 +67,15 @@ def test_release_workflow_includes_changelog_excerpt():
     release_workflow = _read(".github/workflows/release.yml")
     assert "extract_changelog" in release_workflow
     assert "CHANGELOG.md" in release_workflow
+
+
+def test_release_guide_exists_and_is_linked():
+    release_doc = _read("RELEASE.md")
+    assert "pre-release" in release_doc.lower()
+    assert "scripts/check.py" in release_doc
+    assert "pyproject.toml" in release_doc
+
+    contributing = _read("CONTRIBUTING.md")
+    readme = _read("README.md")
+    assert "RELEASE.md" in contributing
+    assert "RELEASE.md" in readme
