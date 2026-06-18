@@ -34,3 +34,36 @@ def test_architecture_maps_to_current_module_layout():
 def test_architecture_documents_pantsu_context_compat_once():
     arch = _read("ARCHITECTURE.md")
     assert arch.count("pantsu_context.json") == 1
+
+
+def test_changelog_follows_keep_a_changelog_format():
+    changelog = _read("CHANGELOG.md")
+    assert changelog.startswith("# Changelog")
+    assert "## [Unreleased]" in changelog
+    assert "keepachangelog.com" in changelog.lower()
+    assert "## [0.2.0]" in changelog
+
+
+def test_changelog_seeds_recent_major_work():
+    changelog = _read("CHANGELOG.md")
+    for topic in (
+        "message splitting",
+        "native search",
+        "prompt caching",
+        "video",
+        "community standards",
+        "release",
+    ):
+        assert topic.lower() in changelog.lower(), f"missing changelog topic: {topic}"
+
+
+def test_contributing_documents_changelog_updates():
+    contributing = _read("CONTRIBUTING.md")
+    assert "CHANGELOG.md" in contributing
+    assert "Unreleased" in contributing
+
+
+def test_release_workflow_includes_changelog_excerpt():
+    release_workflow = _read(".github/workflows/release.yml")
+    assert "extract_changelog" in release_workflow
+    assert "CHANGELOG.md" in release_workflow
