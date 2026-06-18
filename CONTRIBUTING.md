@@ -103,9 +103,14 @@ Always read AGENTS.md before starting work.
    - `pytest`
    - `python scripts/check.py --skip-docker`
 4. Update documentation (README, ARCHITECTURE.md if architecture changes, etc.) as needed.
-5. Open a Pull Request against `main`.
-6. Fill out the PR template completely (checklists cover philosophy, invariants, tests, safety).
-7. Be responsive to review feedback.
+5. **Update [CHANGELOG.md](./CHANGELOG.md)** under the `## [Unreleased]` section for user-visible changes:
+   - Use [Keep a Changelog](https://keepachangelog.com/) categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
+   - Write concise, user-facing bullets (not commit dumps). Link the PR or issue when helpful.
+   - Skip changelog updates for internal-only refactors, comment-only edits, or test-only changes unless they affect contributors materially.
+   - Release maintainers move `Unreleased` entries into a dated version section when tagging.
+6. Open a Pull Request against `main`.
+7. Fill out the PR template completely (checklists cover philosophy, invariants, tests, safety).
+8. Be responsive to review feedback.
 
 We use conventional-ish commits. Keep PRs small and reviewable.
 

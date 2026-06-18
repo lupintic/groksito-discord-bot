@@ -61,7 +61,7 @@ groksito = "groksito_discord.main:run"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 addopts = "-q --tb=short"
 asyncio_mode = "auto"
 filterwarnings = [
