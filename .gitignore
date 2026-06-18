@@ -116,6 +116,9 @@ Agents.md
 tmp/
 tests/data/
 
+# Isolated git worktrees for parallel feature branches
+.worktrees/
+
 # Grok Builds runtime (local tooling only — never commit; do not delete from workspace).
 # The Discord bot app has no committed MCP/skills integration; these dirs are session artifacts.
 .grok/

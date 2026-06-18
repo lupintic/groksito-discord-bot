@@ -32,7 +32,7 @@ async def test_deliver_media_uses_discord_file_not_urls():
     files = [discord.File(BytesIO(data), filename="groksito_image.png")]
 
     ok = await deliver_media_to_message(
-        orig_msg, caption="Acá tenés.", files=files, kind="image"
+        orig_msg, caption="Aquí tienes la imagen.", files=files, kind="image"
     )
 
     assert ok is True
@@ -108,6 +108,17 @@ def test_video_request_ttl_exceeds_image_ttl():
     assert _request_ttl_for_operation("video") >= 300
 
 
+# Rioplatense markers that leak regional dialect into neutral Grok voice (#110)
+_RIOPLATENSE_MARKERS = ("tenés", "Acá", "acá tenés")
+
+
+def _assert_neutral_spanish_caption(caption: str) -> None:
+    lowered = caption.lower()
+    assert "http" not in lowered
+    for marker in _RIOPLATENSE_MARKERS:
+        assert marker.lower() not in lowered, f"Regional marker {marker!r} in {caption!r}"
+
+
 def test_caption_builders_contain_no_urls():
     assert "http" not in build_image_caption("un gato con botas")
     assert "http" not in build_edit_caption()
@@ -115,3 +126,14 @@ def test_caption_builders_contain_no_urls():
     assert "http" not in cap
     assert "480p" in cap
     assert "/5" not in cap
+
+
+def test_caption_builders_use_neutral_spanish():
+    """Media delivery captions must not default to Rioplatense Spanish (#110)."""
+    for _ in range(30):
+        _assert_neutral_spanish_caption(build_image_caption("un gato con botas"))
+        _assert_neutral_spanish_caption(build_image_caption(None))
+        _assert_neutral_spanish_caption(build_image_caption(""))
+    _assert_neutral_spanish_caption(build_edit_caption())
+    _assert_neutral_spanish_caption(build_video_caption(from_image=False, duration=5))
+    _assert_neutral_spanish_caption(build_video_caption(from_image=True, duration=6))
