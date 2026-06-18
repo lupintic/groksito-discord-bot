@@ -1,15 +1,18 @@
 """
-Core implementation for Groksito conversation context.
+Core implementation for Groksito short-term *channel* context.
 
-This module contains the actual state, persistence, update logic, classification,
-and helper functions. Video generation limits are not tracked here — xAI/SuperGrok
-subscription quotas apply at the API (Grok web parity).
+What IS persisted and available on demand:
+- Per-channel message buffers (``_channel_histories``) — used by ``get_recent_context`` tool
+- Per-channel rolling summaries (``_channel_summaries``) — optional compact history
 
-The package __init__.py re-exports the public surface for backward compatibility
-with existing imports like `from . import context` and `from .context import ...`.
+What is NOT stored or injected into LLM prompts:
+- Per-user memory / profile buffers (removed in #112; legacy ``profiles`` key ignored on load)
+- Automatic injection of channel history into ``build_responses_input`` (see ``llm_input.py``)
 
-Module-level side effects (loading context on import) are preserved for now
-but isolated here. See __init__.py for public API.
+Persistence file: ``data/pantsu_context.json`` — legacy filename kept for existing deployments
+(see ARCHITECTURE.md). Override via ``settings.context_file`` / ``pantsu_context_file``.
+
+Module-level side effects (loading context on import) are preserved. See ``__init__.py``.
 """
 
 from __future__ import annotations
@@ -18,7 +21,6 @@ import json
 import logging
 import time
 from collections import defaultdict, deque
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +45,6 @@ logger = logging.getLogger("groksito.context")
 # Configuration
 # =============================================================================
 MAX_CHANNEL_HISTORY = 150
-MAX_USER_RECENT = 6
 PERSISTENCE_ENABLED = True
 
 # =============================================================================
@@ -53,23 +54,10 @@ _channel_histories: dict[int, deque[dict[str, Any]]] = defaultdict(
     lambda: deque(maxlen=MAX_CHANNEL_HISTORY)
 )
 
-_user_profiles: dict[int, dict[str, Any]] = defaultdict(
-    lambda: {
-        "recent_messages": deque(maxlen=MAX_USER_RECENT),
-        "last_seen": 0.0,
-        "display_name": "",
-    }
-)
-
-# New: lightweight rolling channel summaries (key for token reduction)
+# Lightweight rolling channel summaries (optional compact history for on-demand tools)
 _channel_summaries: dict[int, dict[str, Any]] = defaultdict(
     lambda: {"summary": "", "last_updated": 0.0, "message_count_at_update": 0}
 )
-
-# History buffer maxlen for optional summarization / legacy.
-# No longer used for default injection (only referenced on bot replies).
-MAX_RAW_HISTORY = 8
-
 
 def update_channel_summary(channel_id: int, new_summary: str) -> None:
     """Update or create a compact rolling summary for the channel (called by tool or meta logic)."""
@@ -89,7 +77,11 @@ def update_channel_summary(channel_id: int, new_summary: str) -> None:
 # Persistence (integrated with new config)
 # =============================================================================
 def _get_context_file_path() -> Path:
-    """Return the context persistence file path, with defensive handling."""
+    """Return the context persistence file path, with defensive handling.
+
+    Default filename ``pantsu_context.json`` is a legacy name from pre-standalone extraction;
+    it is intentionally unchanged so existing deployments keep working without migration.
+    """
     try:
         p = settings.context_file
         # Defensive: if misconfigured to a directory (or no .json), fall back to standard file under data_dir
@@ -143,25 +135,20 @@ def _load_context() -> None:
                 dq.append(m)
             _channel_histories[ch_id] = dq
 
-        for uid_str, prof in data.get("profiles", {}).items():
-            uid = int(uid_str)
-            profile = _user_profiles[uid]
-            profile["display_name"] = prof.get("display_name", "")
-            profile["last_seen"] = prof.get("last_seen", 0.0)
+        legacy_profiles = data.get("profiles")
+        if legacy_profiles:
+            logger.debug(
+                f"{cid_prefix()}[Context] Ignoring legacy per-user profiles "
+                f"({len(legacy_profiles)} entries); per-user memory was removed in #112"
+            )
 
-            recent = prof.get("recent_messages", [])[-MAX_USER_RECENT:]
-            dq = deque(maxlen=MAX_USER_RECENT)
-            for m in recent:
-                dq.append(m)
-            profile["recent_messages"] = dq
-
-        # Load channel summaries (new compact feature)
+        # Load channel summaries
         for ch_str, sum_data in data.get("channel_summaries", {}).items():
             ch_id = int(ch_str)
             _channel_summaries[ch_id].update(sum_data)
 
         logger.info(
-            f"{cid_prefix()}✅ Context loaded from {path} (channels={len(_channel_histories)}, users={len(_user_profiles)})"
+            f"{cid_prefix()}✅ Context loaded from {path} (channels={len(_channel_histories)})"
         )
     except PermissionError as e:
         logger.error(
@@ -198,16 +185,6 @@ def save_context() -> bool:
         for ch_id, dq in _channel_histories.items():
             channels_serial[str(ch_id)] = list(dq)[-MAX_CHANNEL_HISTORY:]
 
-        profiles_serial = {}
-        for uid, prof in _user_profiles.items():
-            profiles_serial[str(uid)] = {
-                "display_name": prof.get("display_name", ""),
-                "last_seen": prof.get("last_seen", 0.0),
-                "recent_messages": list(prof.get("recent_messages", []))[
-                    -MAX_USER_RECENT:
-                ],
-            }
-
         # Persist compact channel summaries
         summaries_serial = {}
         for ch_id, sdata in _channel_summaries.items():
@@ -222,7 +199,6 @@ def save_context() -> bool:
             "version": 1,
             "saved_at": time.time(),
             "channels": channels_serial,
-            "profiles": profiles_serial,
             "channel_summaries": summaries_serial,
         }
 
@@ -276,18 +252,6 @@ def update_from_message(
         }
     )
 
-    profile = _user_profiles[user_id]
-    profile["display_name"] = author_name
-    profile["last_seen"] = ts
-
-    profile["recent_messages"].append(
-        {
-            "ts": ts,
-            "channel_id": channel_id,
-            "content": short_content,
-        }
-    )
-
     if PERSISTENCE_ENABLED and (len(_channel_histories[channel_id]) % 8 == 0):
         save_context()
 
@@ -309,19 +273,7 @@ def get_messages_for_summarization(channel_id: int, keep_recent: int = 6) -> lis
     return list(hist)[:-keep_recent]
 
 
-# (internal search accessor removed with the feature)
-
-# (search subsystem removed)
-
-
-# (_strip_accents, _is_pure..._for_classification and classify_query_context_need removed
-# in #24 final cleanup. The heavy classification tiering logic is gone; only the
-# light predicates from intents are used for the few remaining narrow cases.
-# context_need values still appear in a few logging/compat paths for continuity.)
-
-
-logger.info("✅ Context module loaded (buffers + per-user recent messages)")
-# (search_discord_messages and related re-exports removed; feature fully excised for simplification)
+logger.info("✅ Context module loaded (per-channel buffers only; no per-user memory)")
 
 
 # =============================================================================

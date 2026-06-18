@@ -1,18 +1,22 @@
 """
 LLM Input Builder for Groksito (Responses API).
 
-Responsibilities:
-- Light context classification (minimal/normal/image_gen) for logging + native tool gating
-- Minimal context injection: the high-priority referenced [R:...] message for direct replies *to the bot* OR when the bot is directly @mentioned while the user replies to another message (the "describe this YT link my friend posted" case)
-- No automatic per-user memory injection ("let Grok be Grok")
-- No automatic recent-context pre-injection; use the get_recent_context tool on demand.
-- Dynamic context ([R:] + compact emoji header) folded into the *user message* prefix
-  (exactly one system message containing the fixed SYSTEM_PROMPT). This produces a
-  stable identical prefix for xAI prompt_cache_key on every first turn for a user.
-- Multimodal vision (input_image high detail)
+Sent to the model on addressed turns (via ``build_responses_input``):
+- Exactly one system message: the fixed ``SYSTEM_PROMPT`` (stable per-user cache prefix)
+- User message, optionally prefixed with gated dynamic context:
+  - Referenced / reply-chain [R:] blocks (direct replies or @mentions)
+  - Compact per-guild emoji header (top-used emotes for current server)
+- Multimodal vision blocks when images are attached
 
-The concise SYSTEM_PROMPT from prompt_builder.py is used exclusively.
-This is the single source of truth for building the input sent to the Responses API.
+NOT sent automatically (by design — "let Grok be Grok"):
+- Per-user memory / profile buffers (removed from ``context/core.py`` in #112)
+- Channel history or rolling summaries (available only via ``get_recent_context`` tool)
+- Proactive summarization output (disabled by default in config)
+
+Light context classification (minimal/normal/image_gen) is used only for logging
+and native tool gating — not for injecting stored memory.
+
+This module is the single source of truth for ``initial_input`` sent to the API.
 """
 
 from __future__ import annotations
