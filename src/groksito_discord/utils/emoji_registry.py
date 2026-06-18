@@ -263,6 +263,28 @@ def _get_guild_store(guild_id: int | str) -> dict[str, Any]:
     return _EMOJI_KNOWLEDGE["guilds"][gid]
 
 
+def _register_emoji_metadata_sync(guild_id: int | str, emoji_id: int | str, name: str, url: str, animated: bool) -> bool:
+    """Sync in-mem only version for hot paths like record_emojis (no await save)."""
+    store = _get_guild_store(guild_id)
+    eid = str(emoji_id)
+    if eid in store["emojis"]:
+        return False
+    store["emojis"][eid] = {
+        "id": eid,
+        "name": name,
+        "url": url,
+        "animated": bool(animated),
+        "description": None,
+        "usage": "",
+        "usage_count": 0,
+        "discovered_at": time.time(),
+    }
+    store["last_scanned"] = time.time()
+    # schedule real save + possible update
+    asyncio.create_task(_save())
+    return True
+
+
 async def _register_emoji_metadata(
     guild_id: int | str,
     emoji_id: int | str,
@@ -391,6 +413,30 @@ async def scan_guild_emojis(guild: Any) -> int:
     return new_count
 
 
+async def ensure_guild_emojis_registered(guild: Any) -> None:
+    """Lightweight bootstrap from live Discord guild data.
+    Registers current emotes for this guild (metadata only, no vision).
+    Called on messages and guild joins so new emotes are available immediately.
+    """
+    if guild is None:
+        return
+    gid = getattr(guild, "id", None)
+    if not gid:
+        return
+    _ensure_loaded()
+    try:
+        for em in list(getattr(guild, "emojis", []) or []):
+            eid = getattr(em, "id", None)
+            if not eid:
+                continue
+            name = getattr(em, "name", None) or f"emoji_{eid}"
+            url = str(getattr(em, "url", "")) or ""
+            animated = bool(getattr(em, "animated", False))
+            await _register_emoji_metadata(gid, eid, name, url, animated)
+    except Exception:
+        pass
+
+
 async def scan_all_accessible_emojis(client: Any) -> None:
     """
     Called at startup (on_ready). Scans every guild the bot can see that is
@@ -455,9 +501,23 @@ def record_emojis_from_message(message: Any) -> None:
             eid = str(eid_str)
             rec = store["emojis"].get(eid)
             if not rec:
-                # We saw an emoji id we don't have metadata for (possible race or partial cache).
-                # Skip for now; next startup scan will pick it up.
-                continue
+                # Bootstrap from live guild data (current server only)
+                bootstrapped = False
+                if guild:
+                    for em in getattr(guild, "emojis", []) or []:
+                        if str(getattr(em, "id", "")) == eid:
+                            name = getattr(em, "name", None) or f"emoji_{eid}"
+                            url = str(getattr(em, "url", "")) or ""
+                            animated = bool(getattr(em, "animated", False))
+                            # immediate in-mem + schedule async register/save
+                            _register_emoji_metadata_sync(guild_id, eid, name, url, animated)
+                            asyncio.create_task(_register_emoji_metadata(guild_id, eid, name, url, animated))
+                            rec = store["emojis"].get(eid)
+                            bootstrapped = True
+                            break
+                if not rec:
+                    # Still unknown - will be picked on next ensure/scan
+                    continue
 
             # Increment usage
             prev = rec.get("usage_count", 0)
@@ -526,9 +586,7 @@ def get_emoji_descriptions_for_prompt(
     emojis: dict[str, dict] = {}
     if guild_id:
         emojis = get_emojis_for_guild(guild_id)
-
-    if not emojis:
-        emojis = get_all_known_emojis()
+    # Strict: no cross-guild fallback. Only this server's emotes (live bootstrap elsewhere)
 
     if not emojis:
         return ""
@@ -568,39 +626,57 @@ def get_emoji_descriptions_for_prompt(
     return block
 
 
-def get_emoji_compact_header(guild_id: int | str | None = None) -> str:
+def get_emoji_compact_header(guild_id: int | str | None = None, guild_obj: Any = None) -> str:
     """
-    Ultra-lightweight header (1-2 lines max, ~40-80 tokens even on huge servers).
-    Safe to inject more often than the full descriptive list.
+    Lightweight header for the main conversational path.
+    Now uses the best ~8 most-used emotes (by real usage_count) for this server only,
+    with short descriptions so the model knows when to use them.
 
-    Tells the model to use clean shortcode :name: (the system upgrades it to the
-    full renderable form at send time).
-
-    Used by the main conversational path on addressed turns (via llm_input) for
-    prompt-cache stability and low token overhead. The full ranked list
-    (get_emoji_descriptions_for_prompt) remains for specialized / one-off uses.
-    Compact text is intentionally stable (small alpha sample + fixed phrasing).
+    Strictly scoped to the current guild (live data + persisted counts).
+    Gated to addressed turns in llm_input.
     """
     _ensure_loaded()
 
     emojis = {}
     if guild_id:
         emojis = get_emojis_for_guild(guild_id)
-    if not emojis:
-        emojis = get_all_known_emojis()
+    # Strict per-guild only (live data merged via callers/ensure). No cross fallback.
+
+    if guild_obj:
+        # Merge live current emotes (for accuracy + bootstrap counts=0 case)
+        for em in getattr(guild_obj, "emojis", []) or []:
+            eid = str(getattr(em, "id", ""))
+            if eid and eid not in emojis:
+                emojis[eid] = {
+                    "id": eid,
+                    "name": getattr(em, "name", ""),
+                    "usage_count": 0,
+                    "description": None,
+                    "usage": "",
+                }
 
     total = len(emojis)
     if total == 0:
         return ""
 
-    # Pick a few example names (first 5 alphabetically) as a hint
-    sample_names = sorted(emojis.values(), key=lambda r: r.get("name", ""))[:5]
-    examples = ", ".join(f":{r['name']}:" for r in sample_names if r.get("name"))
+    # Top by usage (best 8), include short desc when we have it
+    sorted_recs = sorted(
+        emojis.values(),
+        key=lambda r: (-int(r.get("usage_count", 0)), r.get("name", "")),
+    )[:8]
 
-    if examples:
-        return f"[This server has {total} custom emojis (e.g. {examples}). Use the shortcode form :name: naturally in your sentences (the system will make it render). Good: 'Jajaja :jaja: eso fue épico'. Do not output raw <:name:ID>. Use sparingly when the vibe fits.]"
-    else:
-        return f"[This server has {total} custom emojis. Use shortcodes :name: naturally in text (system converts for rendering). Never raw full form. Use sparingly and naturally when the tone fits.]"
+    lines = []
+    for rec in sorted_recs:
+        name = rec.get("name", "unknown")
+        desc = (rec.get("description") or "").strip()
+        shortcode = f":{name}:"
+        if desc:
+            lines.append(f"{shortcode} — {desc[:80]}")
+        else:
+            lines.append(shortcode)
+
+    examples = ", ".join(lines)
+    return f"[This server has custom emotes. Top used: {examples}. Use :name: shortcodes naturally (system renders). Only when it fits the vibe.]"
 
 
 def get_usable_emoji_names(guild_id: int | str | None = None) -> list[str]:
@@ -609,7 +685,8 @@ def get_usable_emoji_names(guild_id: int | str | None = None) -> list[str]:
     if guild_id:
         ems = get_emojis_for_guild(guild_id)
     else:
-        ems = get_all_known_emojis()
+        ems = {}
+    # Strict: only current guild (no aggregate)
     return [f":{r['name']}:" for r in ems.values() if r.get("name")]
 
 
@@ -620,7 +697,7 @@ def get_usable_emoji_names(guild_id: int | str | None = None) -> list[str]:
 _EMOJI_RAW_PATTERN = re.compile(r"<:?(a:)?([a-zA-Z0-9_]+):\d+>")
 
 
-def normalize_bot_emoji_output(text: str, guild_id: int | str | None = None) -> str:
+def normalize_bot_emoji_output(text: str, guild_id: int | str | None = None, guild_obj: Any = None) -> str:
     """
     Safety net for bot emoji output.
 
@@ -629,17 +706,27 @@ def normalize_bot_emoji_output(text: str, guild_id: int | str | None = None) -> 
     raw forms) into the exact full `<:name:REAL_ID>` (or `<a:name:ID>`) that a bot
     must use so the custom emoji reliably renders as an image.
 
-    We only act on emojis we know belong to the guild.
+    We only act on emojis we know belong to the guild. Prefers live guild_obj for current IDs.
     """
     if not text:
         return text
 
     # Build lookup: name -> correct full token
     name_to_full: dict[str, str] = {}
-    if guild_id:
+    recs = {}
+    if guild_obj:
+        # prefer live current server emotes for accurate IDs
+        for em in getattr(guild_obj, "emojis", []) or []:
+            eid = str(getattr(em, "id", ""))
+            name = getattr(em, "name", None)
+            if name and eid:
+                recs[eid] = {
+                    "id": eid,
+                    "name": name,
+                    "animated": bool(getattr(em, "animated", False)),
+                }
+    if not recs and guild_id:
         recs = get_emojis_for_guild(guild_id)
-    else:
-        recs = get_all_known_emojis()
 
     for rec in recs.values():
         name = rec.get("name")

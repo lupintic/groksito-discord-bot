@@ -863,6 +863,17 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
                 feature="Health",
             )
 
+    @_discord_client.event
+    async def on_guild_join(guild):
+        # Ensure emotes for newly joined guild (for testing multi-server scenarios)
+        # so the server-specific list is populated from live data immediately.
+        try:
+            from ..utils import emoji_registry
+            asyncio.create_task(emoji_registry.ensure_guild_emojis_registered(guild))
+            logger.info(f"[Emoji] on_guild_join: registered live emotes for guild {getattr(guild, 'id', '?')}")
+        except Exception as emoji_join_err:
+            logger.debug(f"[Emoji] on_guild_join ensure skipped (non-fatal): {emoji_join_err}")
+
     # on_message - thin orchestrator (most logic lives in conversation.py)
     #
     # Invariants maintained here:
@@ -894,6 +905,13 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
             if message.guild and not is_guild_allowed(message.guild.id):
                 logger.info(f"{cid_p}[SECURITY] Ignoring message from unauthorized guild {message.guild.id}")
                 return
+
+            # Bootstrap live emotes for *this* server so top-used list and normalize are always current.
+            try:
+                from ..utils import emoji_registry
+                asyncio.create_task(emoji_registry.ensure_guild_emojis_registered(message.guild))
+            except Exception:
+                pass
 
             # Learn which custom emotes are actually used in this server (efficient local tracking).
             # This lets us surface only the popular ones + do vision descriptions lazily instead of

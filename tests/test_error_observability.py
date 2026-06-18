@@ -194,3 +194,55 @@ def test_env_utils_parse_failure_logs_warning(tmp_path, caplog):
     values = parse_env_file(bad_env)
     assert values == {}
     assert any("Failed to parse .env" in r.message for r in caplog.records)
+
+
+def test_emoji_registry_strict_per_guild_no_cross_fallback(monkeypatch, tmp_path):
+    from groksito_discord.utils import emoji_registry
+    emoji_registry._EMOJI_KNOWLEDGE = {
+        "version": 1,
+        "guilds": {
+            "111": {"emojis": {"1": {"id": "1", "name": "a", "usage_count": 10}}},
+            "222": {"emojis": {"2": {"id": "2", "name": "b", "usage_count": 5}}},
+        },
+    }
+    emoji_registry._LOADED = True
+
+    # Strict for guild 111
+    g111 = emoji_registry.get_emojis_for_guild("111")
+    assert "1" in g111 and "2" not in g111
+
+    # descriptions should only see 111's (no fallback)
+    block = emoji_registry.get_emoji_descriptions_for_prompt("111", max_emotes=2)
+    assert ":a:" in block and ":b:" not in block
+
+    # normalize for 111 must not know 222's ID
+    out = emoji_registry.normalize_bot_emoji_output(":b: foo", "111")
+    assert "<:b:" not in out   # no foreign ID
+
+
+def test_get_top_used_emotes_caps_at_8_and_ranks_by_usage(monkeypatch, tmp_path):
+    from groksito_discord.utils import emoji_registry
+    ems = {str(i): {"id": str(i), "name": f"e{i}", "usage_count": 10-i, "description": f"desc{i}"} for i in range(1,15)}
+    emoji_registry._EMOJI_KNOWLEDGE = {"version":1, "guilds": {"333": {"emojis": ems}}}
+    emoji_registry._LOADED = True
+
+    # After impl this will use usage-ranked top 8 (descriptions_for_prompt re-used/adapted for now)
+    block = emoji_registry.get_emoji_descriptions_for_prompt("333", max_emotes=8)
+    assert block.count(":e") == 8
+    assert ":e1:" in block and ":e8:" in block  # highest usage first
+    assert ":e9:" not in block  # capped
+
+
+def test_normalize_prefers_live_guild_emojis(monkeypatch):
+    from groksito_discord.utils import emoji_registry
+    # Simulate live guild with different ID for same name
+    class FakeEmoji:
+        def __init__(self, i, n): self.id = i; self.name = n; self.animated = False
+    class FakeGuild:
+        emojis = [FakeEmoji(999, "jaja")]
+    emoji_registry._EMOJI_KNOWLEDGE = {"version":1, "guilds": {"444": {"emojis": {"old": {"id":"old", "name":"jaja", "usage_count":1}}}}}
+    emoji_registry._LOADED = True
+
+    # normalize accepts guild_obj and prefers live IDs
+    out = emoji_registry.normalize_bot_emoji_output(":jaja: hi", "444", guild_obj=FakeGuild())
+    assert "<:jaja:999>" in out

@@ -155,7 +155,8 @@ async def execute_hybrid_tool(
                 try:
                     from ..utils import emoji_registry
                     gid = getattr(getattr(original_message, "guild", None), "id", None)
-                    content = emoji_registry.normalize_bot_emoji_output(content, gid)
+                    gobj = getattr(original_message, "guild", None)
+                    content = emoji_registry.normalize_bot_emoji_output(content, gid, guild_obj=gobj)
                 except Exception as emoji_norm_err:
                     tools_logger.debug(f"[Emoji] reply_to_user normalization skipped (non-fatal): {emoji_norm_err}")
 
@@ -191,7 +192,8 @@ async def execute_hybrid_tool(
                 try:
                     from ..utils import emoji_registry
                     gid = getattr(getattr(original_message, "guild", None), "id", None)
-                    emoji = emoji_registry.normalize_bot_emoji_output(emoji, gid)
+                    gobj = getattr(original_message, "guild", None)
+                    emoji = emoji_registry.normalize_bot_emoji_output(emoji, gid, guild_obj=gobj)
                 except Exception as emoji_norm_err:
                     tools_logger.debug(f"[Emoji] react_to_message normalization skipped (non-fatal): {emoji_norm_err}")
                 await original_message.add_reaction(emoji)
@@ -212,7 +214,8 @@ async def execute_hybrid_tool(
                 try:
                     from ..utils import emoji_registry
                     gid = getattr(getattr(original_message, "guild", None), "id", None)
-                    content = emoji_registry.normalize_bot_emoji_output(content, gid)
+                    gobj = getattr(original_message, "guild", None)
+                    content = emoji_registry.normalize_bot_emoji_output(content, gid, guild_obj=gobj)
                 except Exception as emoji_norm_err:
                     tools_logger.debug(f"[Emoji] create_thread normalization skipped (non-fatal): {emoji_norm_err}")
 
