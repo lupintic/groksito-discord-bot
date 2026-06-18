@@ -10,8 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - GHCR release publishing: version, `latest` (stable only), and `sha-<short>` tags for bot and web images; OCI image labels; README and compose docs for pre-built images (#99)
 
-### Added
-
 ### Changed
 
 ### Fixed
