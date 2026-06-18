@@ -108,6 +108,49 @@ def _build_multimodal_user_content(
     return content
 
 
+_DO_NOT_REPEAT_NOTE = (
+    "(Context only — do not repeat or paste the bracketed text in your reply.)"
+)
+
+
+def _is_bot_context(ctx: dict) -> bool:
+    """True when referenced/chain context was authored by this bot."""
+    if ctx.get("is_bot"):
+        return True
+    author = (ctx.get("author") or "").strip().lower()
+    return author in ("groksito", "grok")
+
+
+def _format_referenced_context_line(
+    ref_summary: dict,
+    *,
+    is_reply_to_bot: bool,
+) -> str:
+    """Format the direct referenced message for model context."""
+    ref_content = (ref_summary.get("content") or "").strip()[:150]
+    if is_reply_to_bot and _is_bot_context(ref_summary):
+        return (
+            "The user is now replying to my previous response:\n"
+            f"[My last message] {ref_content}\n"
+            f"{_DO_NOT_REPEAT_NOTE}"
+        )
+    author = ref_summary.get("author", "?")
+    return f"[R:{author}] {ref_content}"
+
+
+def _format_chain_ancestor_line(ctx: dict, index: int) -> str | None:
+    """Format a deeper reply-chain ancestor (skips index 0 — same as direct ref)."""
+    content = (ctx.get("content") or "").strip()[:100]
+    links = (ctx.get("external_links") or [])[:1]
+    link_note = f" (link: {links[0]})" if links else ""
+    if not (content or links):
+        return None
+    if _is_bot_context(ctx):
+        return f"[My earlier message {index}] {content}"
+    author = ctx.get("author", "?")
+    return f"[Chain ancestor {index} by {author}]{link_note} {content}"
+
+
 def _build_dynamic_referenced_context_block(
     *,
     referenced_context: dict | None,
@@ -136,19 +179,16 @@ def _build_dynamic_referenced_context_block(
         if not (ref_summary.get("image_urls") or x_links or ext_links):
             logger.info(f"{cid_prefix()}[LLM] High-priority reply context injected (text only, addr={addr})")
 
-        ref_content = (ref_summary.get("content") or "").strip()[:150]
-        high_priority_ref = f"[R:{ref_summary.get('author','?')}] {ref_content}"
-        context_parts.append(high_priority_ref)
+        context_parts.append(
+            _format_referenced_context_line(ref_summary, is_reply_to_bot=is_reply_to_bot)
+        )
 
     if reply_chain_contexts:
         ancestor_lines = []
         for i, ctx in enumerate(reply_chain_contexts[1:3]):
-            content = (ctx.get("content") or "").strip()[:100]
-            author = ctx.get("author", "?")
-            links = (ctx.get("external_links") or [])[:1]
-            link_note = f" (link: {links[0]})" if links else ""
-            if content or links:
-                ancestor_lines.append(f"[Chain ancestor {i+1} by {author}]{link_note} {content}")
+            line = _format_chain_ancestor_line(ctx, i + 1)
+            if line:
+                ancestor_lines.append(line)
         if ancestor_lines:
             context_parts.append("\n".join(ancestor_lines))
             logger.info(f"{cid_prefix()}[LLM] Injected {len(ancestor_lines)} reply chain ancestor(s) for text referent resolution")

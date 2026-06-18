@@ -207,7 +207,9 @@ async def _build_referenced_context(referenced: Any) -> dict[str, Any]:
             ref_content = raw_content[:450] + " ... " + raw_content[-150:]
         else:
             ref_content = raw_content
-        ref_author = getattr(getattr(referenced, "author", None), "display_name", "unknown")
+        ref_author_obj = getattr(referenced, "author", None)
+        ref_author = getattr(ref_author_obj, "display_name", "unknown")
+        is_bot = bool(getattr(ref_author_obj, "bot", False))
 
         attachments = []
         image_urls = []
@@ -237,6 +239,7 @@ async def _build_referenced_context(referenced: Any) -> dict[str, Any]:
 
         context = {
             "author": ref_author,
+            "is_bot": is_bot,
             "content": ref_content,
             "attachments": attachments,
             "has_attachments": len(attachments) > 0,
