@@ -114,6 +114,10 @@ Always read AGENTS.md before starting work.
 
 We use conventional-ish commits. Keep PRs small and reviewable.
 
+## Releasing (Maintainers)
+
+Cutting pre-releases and stable releases is documented in [RELEASE.md](./RELEASE.md): versioning policy, tag conventions (`v0.3.0-pre.1`, `v0.3.0-rc.1`, `v0.3.0`), verification gates (`python scripts/check.py`), changelog prep, and post-release updates to [SECURITY.md](./SECURITY.md).
+
 ## Reporting Issues
 
 Use the GitHub issue templates (bug report / feature request). For security issues, use the private reporting flow described in [SECURITY.md](./SECURITY.md).
