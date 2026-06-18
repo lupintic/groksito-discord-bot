@@ -50,6 +50,7 @@ Documentation = "https://github.com/lupintic/groksito-discord-bot#readme"
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-asyncio",
 ]
 
 [tool.setuptools.packages.find]
@@ -62,6 +63,7 @@ groksito = "groksito_discord.main:run"
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --tb=short"
+asyncio_mode = "auto"
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
