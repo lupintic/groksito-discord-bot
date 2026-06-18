@@ -51,7 +51,7 @@ class TestSystemPromptCompleteness:
         assert "self-check" in lowered
         assert "web-grok-level completeness" in lowered or "web-grok" in lowered
         assert "multiple focused searches" in lowered
-        assert "balance extra completeness with accuracy" in lowered
+        assert "balance completeness with accuracy" in lowered
         assert "1-2 key facts" not in lowered
 
 
@@ -70,7 +70,7 @@ class TestPromptSingleSourceOfTruth:
         )
         assert web_b == web_n
         assert "multiple focused searches" in web_b
-        assert "comprehensive" in web_b.lower()
+        assert "well-known options" in web_b or "comprehensive" in web_b.lower()
 
 
 class TestNativeSearchBreadthDescriptions:
@@ -83,7 +83,7 @@ class TestNativeSearchBreadthDescriptions:
         )
         web = next(t for t in tools if t["type"] == "web_search")
         assert "multiple focused searches" in web["description"]
-        assert "comprehensive" in web["description"].lower()
+        assert "well-known options" in web["description"] or "comprehensive" in web["description"].lower()
 
     def test_normal_query_avoids_one_to_two_fact_cap(self):
         tools = _build_native_search_tools(
@@ -122,4 +122,46 @@ class TestProactiveSearchGuidance:
         )
         types = {t["type"] for t in tools}
         assert types == {"web_search", "x_search"}
+
+
+class TestGrokVoiceGuidance:
+    """Grok identity + neutral voice anchoring (#111)."""
+
+    def test_system_prompt_anchors_grok_identity_and_neutral_voice(self):
+        lowered = SYSTEM_PROMPT.lower()
+        assert lowered.startswith("you are grok (groksito on this discord server).")
+        assert "truth-seeking" in lowered or "truth seeking" in lowered
+        assert "helpful" in lowered
+        assert "curious" in lowered
+        assert "neutral" in lowered or "dialect" in lowered
+        assert "mirror" in lowered or "match" in lowered
+        assert "vos" in lowered or "tenés" in lowered or "regional slang" in lowered
+        assert "get_recent_context only when" in lowered
+
+    def test_system_prompt_avoids_default_regional_spanish_markers(self):
+        """Prompt should discourage default Rioplatense flavor, not embed it."""
+        lowered = SYSTEM_PROMPT.lower()
+        assert "acá tenés" not in lowered
+        assert "friendly and natural (spanish + english/mixes)" not in lowered
+
+    def test_system_prompt_stays_cache_friendly_length(self):
+        """New voice block must not bloat the stable system prefix."""
+        assert len(SYSTEM_PROMPT) <= 3200
+
+    def test_get_recent_context_tool_description_from_prompt_builder(self):
+        from groksito_discord.llm import prompt_builder
+        from groksito_discord.llm.tools import _get_recent_context_schema
+
+        assert hasattr(prompt_builder, "GET_RECENT_CONTEXT_TOOL_DESCRIPTION")
+        schema = _get_recent_context_schema()
+        assert schema["description"] == prompt_builder.GET_RECENT_CONTEXT_TOOL_DESCRIPTION
+        assert "get_recent_context only when" in schema["description"].lower()
+
+    def test_native_search_descriptions_derive_from_shared_guidance(self):
+        from groksito_discord.llm import prompt_builder
+
+        web, x = prompt_builder.get_native_search_descriptions("hoy")
+        assert prompt_builder.FRESHNESS_GUIDANCE.split()[0].lower() in web.lower()
+        assert prompt_builder.SEARCH_FOCUSED_SYNTHESIS.rstrip(".") in web
+        assert prompt_builder.X_SEARCH_SYNTHESIS in x
 

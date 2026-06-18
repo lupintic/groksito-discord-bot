@@ -28,6 +28,7 @@ from ..utils.correlation import cid_prefix
 
 from .. import context
 from ..media.delivery import register_image_request, consume_image_request
+from .prompt_builder import GET_RECENT_CONTEXT_TOOL_DESCRIPTION
 from .media_tools import (
     _generate_video_schema,
     _generate_video_schema_tiny,
@@ -352,11 +353,7 @@ def _get_recent_context_schema() -> dict:
     return {
         "type": "function",
         "name": "get_recent_context",
-        "description": (
-            "Fetches a compact, targeted on-demand summary of recent messages in the current Discord channel. "
-            "Helpful when the user's question refers to or continues prior discussion, shared context, or earlier turns in the thread. "
-            "After receiving the summary you can reason further or call respond_directly (or other tools) to deliver the final answer."
-        ),
+        "description": GET_RECENT_CONTEXT_TOOL_DESCRIPTION,
         "parameters": {
             "type": "object",
             "properties": {
