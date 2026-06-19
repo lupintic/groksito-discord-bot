@@ -85,7 +85,7 @@ def _generate_image_schema_tiny() -> dict:
         "parameters": {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "prompt (preserve suggestive busty/tetona/curvy/sexy/bikini; only change for nude or explicit acts)"},
+                "prompt": {"type": "string", "description": "prompt (use the user's original language/words as closely as possible; preserve suggestive busty/tetona/curvy/sexy/bikini; only change for nude or explicit acts)"},
                 "count": {"type": "integer", "default": 1},
                 "aspect_ratio": {"type": "string"}
             },
