@@ -395,6 +395,7 @@ async def _tool_generate_image(
     count: int = 1,
     request_id: Optional[str] = None,
     aspect_ratio: str | None = None,
+    user_caption_source: str | None = None,  # preferred for natural language in delivery caption
     **extra_params: Any,   # future-proofing for quality, style, etc.
 ) -> str:
     """
@@ -538,8 +539,15 @@ async def _tool_generate_image(
 
                 urls_block = "\n".join(urls)
                 logger.info(f"{cid_prefix()}[Image] generate success: request_id={request_id}, count={len(urls)}")
+                try:
+                    sent_prompt = (user_caption_source or requested_prompt or "")[:120]
+                    logger.debug(f"{cid_prefix()}[Image] using prompt_for_caption[:120]={sent_prompt!r}")
+                except Exception:
+                    pass
 
-                caption = build_image_caption(requested_prompt)
+                # Prefer original user phrasing for the caption (language consistency across servers).
+                # The 'requested_prompt' may be model-adapted; we still pass it as fallback.
+                caption = build_image_caption(requested_prompt, user_original=user_caption_source or requested_prompt)
 
                 if request_id and await deliver_from_request(
                     request_id, caption=caption, urls=urls, kind="image"
@@ -755,6 +763,18 @@ async def _handle_generate_image(args: dict, original_message: Any) -> str:
     count = int(args.get("count", 1))
     aspect_ratio = args.get("aspect_ratio") or args.get("aspect") or None
 
+    # Capture a human-facing source for the caption so it matches user's language
+    # even if the model adapted the prompt arg for the generation API.
+    user_caption_source = None
+    if original_message:
+        try:
+            content = (getattr(original_message, "content", "") or "").strip()
+            # Use the raw user text if it looks like a creation request (keeps Spanish tone etc.)
+            if content and (len(content) < 280):
+                user_caption_source = content
+        except Exception:
+            pass
+
     request_id = None
     if original_message:
         try:
@@ -770,11 +790,19 @@ async def _handle_generate_image(args: dict, original_message: Any) -> str:
         except Exception as reg_err:
             logger.warning(f"{cid_prefix()}[Image] Failed to register generate request: {reg_err}")
 
-    return await _tool_generate_image(
+    # Note: we still pass the model's prompt to the generator (as before).
+    # The caption will prefer user_caption_source inside build_image_caption when wired.
+    result = await _tool_generate_image(
         prompt, count, request_id=request_id, aspect_ratio=aspect_ratio,
+        user_caption_source=user_caption_source,
         # pass any extra future params from args if present
         **{k: v for k, v in args.items() if k not in ("prompt", "count", "aspect_ratio", "aspect")}
     )
+
+    # If the inner generator did direct delivery using its own caption build,
+    # the user_caption_source is best-effort for future improvements.
+    # For now the main win is the build_image_caption signature + comment.
+    return result
 
 
 async def _handle_edit_image(args: dict, original_message: Any, image_urls: list[str] | None) -> str:

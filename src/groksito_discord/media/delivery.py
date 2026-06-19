@@ -117,9 +117,17 @@ async def _cleanup_expired_image_requests() -> None:
 # Discord attachment delivery
 # =============================================================================
 
-def build_image_caption(prompt: str | None = None) -> str:
-    """Short, natural caption for image delivery (no URLs)."""
-    short_desc = (prompt or "").strip()
+def build_image_caption(prompt: str | None = None, *, user_original: str | None = None) -> str:
+    """Short, natural caption for image delivery (no URLs).
+
+    Prefers user_original (the actual text the human typed) for the visible caption
+    so language/tone stays consistent with the user even if the model passed a
+    slightly adapted prompt to the generation API. This helps cross-server
+    consistency (no more English-primed tool prompts leaking into captions).
+    Falls back to the tool prompt if no user_original.
+    """
+    source = (user_original or prompt or "").strip()
+    short_desc = source
     for prefix in ("un ", "una ", "el ", "la ", "los ", "las "):
         if short_desc.lower().startswith(prefix):
             short_desc = short_desc[len(prefix) :].strip()
@@ -252,6 +260,12 @@ async def deliver_media_to_message(
         await orig_msg.reply(caption, files=attachments[:10], mention_author=False)
     except Exception as send_err:
         logger.error(f"{cid_prefix()}[MediaDelivery] Discord reply failed ({kind}): {send_err}")
+        # This will cause sentinel not to be returned; model will likely produce a text reply (may be in English on some servers).
+        try:
+            gid = getattr(getattr(orig_msg, 'guild', None), 'id', None)
+            logger.info(f"{cid_prefix()}[MediaDelivery] Delivery fallback will let model speak (guild={gid}, kind={kind})")
+        except Exception:
+            pass
         return False
 
     try:
@@ -294,10 +308,18 @@ async def deliver_from_request(
         return False
 
     orig_msg = info.get("original_message")
-    return await deliver_media_to_message(
+    delivered = await deliver_media_to_message(
         orig_msg,
         caption=caption,
         urls=urls,
         files=files,
         kind=kind,
     )
+    if not delivered:
+        try:
+            ch_id = getattr(getattr(orig_msg, "channel", None), "id", None)
+            gid = getattr(getattr(orig_msg, "guild", None), "id", None)
+            logger.warning(f"{cid_prefix()}[MediaDelivery] deliver_from_request failed to deliver (guild={gid} ch={ch_id}) — model will likely emit text reply")
+        except Exception:
+            pass
+    return delivered

@@ -214,6 +214,7 @@ GENERATE_IMAGE_TOOL_INTRO = (
 
 GENERATE_IMAGE_TOOL_INTRO_TINY = (
     "Generate image (ultra-light mode for pure creation requests).\n"
+    "When calling, pass the user's request in the 'prompt' parameter using the user's original language and wording as closely as possible. Do not translate to English unless the user asked in English.\n"
 )
 
 EDIT_IMAGE_TOOL_DESCRIPTION = (

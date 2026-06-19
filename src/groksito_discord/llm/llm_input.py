@@ -207,16 +207,25 @@ def _build_emoji_block_if_addressed(
     original_message: Any,
     is_reply_to_bot: bool,
     is_mentioned: bool,
+    image_gen_intent: bool = False,
 ) -> str:
     """Return stable compact emoji header only on addressed turns.
 
-    Uses the compact header (not the full ranked list) for prompt cache stability:
-    - Far lower variation (alpha sample + fixed phrasing vs live usage sort + vision desc churn).
-    - Much smaller token cost.
-    - Still tells the model the :shortcode: mechanism and that the system will render.
-    The full descriptions_for_prompt remains available for other call sites if needed.
+    IMPORTANT (cross-server consistency + emote preservation):
+    - Emote knowledge (descriptions + usage) is still fully available and used for *normal* chat.
+    - We deliberately SKIP on pure image/video creation turns (image_gen_intent).
+      Reason: those turns give the model only a tiny generate_* tool and expect zero text output.
+      The English emote header was causing language drift ("sometimes speaks English")
+      and inconsistent prompt text passed to the image API across guilds with different emote sets.
+    - This does NOT remove Groksito's ability to understand or use emotes.
+      Normal addressed conversation turns continue to receive the block so the model
+      can decide when/how to use :shortcode: (which is then normalized per-guild).
     """
     if not (is_reply_to_bot or is_mentioned):
+        return ""
+    if image_gen_intent:
+        # Pure creation request (first-turn "genera una imagen...", etc.).
+        # Keep input minimal and stable across servers. Emote block is irrelevant here.
         return ""
 
     try:
@@ -309,6 +318,7 @@ async def build_responses_input(
         original_message=original_message,
         is_reply_to_bot=is_reply_to_bot,
         is_mentioned=is_mentioned,
+        image_gen_intent=image_gen_intent,
     )
 
     try:
