@@ -36,11 +36,6 @@ import httpx
 
 from ..utils.correlation import cid_prefix
 from ..config import settings
-from ..llm.prompt_builder import (
-    DIRECT_DELIVERY_SUCCESS_VIDEO,
-    VIDEO_TOOL_DESCRIPTION_FULL,
-    VIDEO_TOOL_DESCRIPTION_TINY,
-)
 from .delivery import build_video_caption, deliver_from_request, register_image_request
 
 # Bearer (OAuth preferred)
@@ -196,7 +191,7 @@ def _enhance_video_prompt(prompt: str, is_from_image: bool = False) -> str:
 
     # Quality / production value
     if not any(q in lower for q in ("detall", "calidad", "masterpiece", "cinematic", "4k", "alta")):
-        enhancers.append("sharp details, high production quality, 480p smooth animation")
+        enhancers.append("sharp details, high production quality, smooth animation")
 
     # I2V specific guidance (encourage faithful animation of the reference)
     if is_from_image:
@@ -316,6 +311,7 @@ async def _poll_for_video_completion(
 # =============================================================================
 
 def _generate_video_schema() -> dict:
+    from ..llm.prompt_builder import VIDEO_TOOL_DESCRIPTION_FULL
     return {
         "type": "function",
         "name": "generate_video",
@@ -329,12 +325,17 @@ def _generate_video_schema() -> dict:
                 },
                 "duration": {
                     "type": "integer",
-                    "description": "Seconds (max 6).",
-                    "default": 5
+                    "description": "Duration in seconds (default 6 if not specified).",
+                    "default": 6
                 },
                 "aspect_ratio": {
                     "type": "string",
                     "description": "Text-to-video only (16:9, 9:16, 1:1). Omit for image-to-video.",
+                },
+                "resolution": {
+                    "type": "string",
+                    "description": "Resolution: 480p or 720p. Defaults to 480p if not specified by the user.",
+                    "default": "480p"
                 }
             },
             "required": ["prompt"]
@@ -344,6 +345,7 @@ def _generate_video_schema() -> dict:
 
 def _generate_video_schema_tiny() -> dict:
     """Minimal schema for native Grok video decisions on addressed turns (mirrors image tiny)."""
+    from ..llm.prompt_builder import VIDEO_TOOL_DESCRIPTION_TINY
     return {
         "type": "function",
         "name": "generate_video",
@@ -357,12 +359,17 @@ def _generate_video_schema_tiny() -> dict:
                 },
                 "duration": {
                     "type": "integer",
-                    "description": "Seconds (max 6).",
-                    "default": 5,
+                    "description": "Duration in seconds (default 6 if not specified).",
+                    "default": 6,
                 },
                 "aspect_ratio": {
                     "type": "string",
                     "description": "Text-to-video only (16:9, 9:16, 1:1). Omit for image-to-video.",
+                },
+                "resolution": {
+                    "type": "string",
+                    "description": "Resolution: 480p or 720p. Defaults to 480p if not specified by the user.",
+                    "default": "480p"
                 },
             },
             "required": ["prompt"],
@@ -376,10 +383,11 @@ def _generate_video_schema_tiny() -> dict:
 
 async def _tool_generate_video(
     prompt: str,
-    duration: int = 5,
+    duration: int = 6,
     aspect_ratio: str | None = None,
     request_id: Optional[str] = None,
     source_image_url: str | None = None,
+    resolution: str = "480p",
     **extra_params: Any,
 ) -> str:
     """
@@ -395,7 +403,9 @@ async def _tool_generate_video(
     if not api_key:
         return "No xAI credential configured for video generation (run --login-oauth or set XAI_API_KEY)."
 
-    enforced_duration = min(max(duration, 3), 6)
+    enforced_duration = min(max(duration, 3), 15)  # Grok max ~15s; default to 6s if user doesn't specify
+    # Use user-specified resolution if provided (e.g. 720p), else default 480p
+    final_resolution = resolution if resolution else "480p"
     is_from_image = bool(source_image_url)
 
     # === Modern prompt enhancement (always-on) ===
@@ -425,7 +435,7 @@ async def _tool_generate_video(
             "model": extra_params.get("model", "grok-imagine-video"),
             "prompt": enhanced_prompt,
             "duration": enforced_duration,
-            "resolution": "480p",
+            "resolution": final_resolution,
         }
         if resolved_aspect_ratio:
             video_payload["aspect_ratio"] = resolved_aspect_ratio
@@ -565,6 +575,7 @@ async def _tool_generate_video(
         caption = build_video_caption(
             from_image=is_from_image,
             duration=enforced_duration,
+            prompt=prompt,
         )
 
         if request_id and await deliver_from_request(
@@ -574,6 +585,7 @@ async def _tool_generate_video(
                 f"{cid_prefix()}[MediaDelivery] Video delivered as attachment for request {request_id} "
                 f"(xAI id: {xai_video_id})"
             )
+            from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_VIDEO
             return DIRECT_DELIVERY_SUCCESS_VIDEO
 
         return f"Video generated successfully:\n{video_url}"
@@ -596,8 +608,9 @@ async def _handle_generate_video(args: dict, original_message: Any, image_urls: 
     """
     prompt = args.get("prompt", "")
 
-    duration = int(args.get("duration", 5))
+    duration = int(args.get("duration", 6))
     aspect_ratio = args.get("aspect_ratio") or args.get("aspect") or None
+    resolution = args.get("resolution", "480p")
 
     source_image_url = image_urls[0] if image_urls else None
 
@@ -622,6 +635,16 @@ async def _handle_generate_video(args: dict, original_message: Any, image_urls: 
         aspect_ratio=aspect_ratio,
         request_id=request_id,
         source_image_url=source_image_url,
+        resolution=resolution,
         # forward any extra future params the caller might have received
-        **{k: v for k, v in args.items() if k not in ("prompt", "duration", "aspect_ratio", "aspect")}
+        **{k: v for k, v in args.items() if k not in ("prompt", "duration", "aspect_ratio", "aspect", "resolution")}
     )
+
+
+# Lazy module-level re-export for DIRECT_* (test_guidance_centralization).
+# Avoids top-level llm.prompt_builder import (cycle risk).
+def __getattr__(name: str):
+    if name == "DIRECT_DELIVERY_SUCCESS_VIDEO":
+        from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_VIDEO
+        return DIRECT_DELIVERY_SUCCESS_VIDEO
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

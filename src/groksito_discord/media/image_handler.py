@@ -19,11 +19,6 @@ import httpx
 
 from ..utils.correlation import cid_prefix
 from ..config import settings
-from ..llm.prompt_builder import (
-    DIRECT_DELIVERY_SUCCESS_EDIT,
-    DIRECT_DELIVERY_SUCCESS_IMAGE,
-    DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK,
-)
 from .delivery import (
     _download_url,
     build_edit_caption,
@@ -518,6 +513,7 @@ async def _tool_generate_image(
                                     except Exception:
                                         pass
                                     logger.info(f"{cid_prefix()}[ImageDelivery] Direct clean policy message for generate {request_id}")
+                                    from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK
                                     return DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK
                             except Exception as dir_err:
                                 logger.warning(f"{cid_prefix()}[ImageDelivery] Direct policy delivery failed: {dir_err}")
@@ -552,6 +548,7 @@ async def _tool_generate_image(
                 if request_id and await deliver_from_request(
                     request_id, caption=caption, urls=urls, kind="image"
                 ):
+                    from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_IMAGE
                     return DIRECT_DELIVERY_SUCCESS_IMAGE
 
                 return f"Image URLs ready:\n{urls_block}"
@@ -661,11 +658,11 @@ def _extract_edit_urls(data: dict) -> list[str]:
     return urls
 
 
-async def _try_direct_edit_delivery(request_id: str, urls: list[str]) -> bool:
+async def _try_direct_edit_delivery(request_id: str, urls: list[str], prompt: str | None = None) -> bool:
     if not request_id:
         return False
     return await deliver_from_request(
-        request_id, caption=build_edit_caption(), urls=urls, kind="image"
+        request_id, caption=build_edit_caption(prompt=prompt), urls=urls, kind="image"
     )
 
 
@@ -735,7 +732,8 @@ async def _tool_edit_image(
         if not urls:
             return "Could not generate the edited images (empty response)."
 
-        if await _try_direct_edit_delivery(request_id, urls):
+        if await _try_direct_edit_delivery(request_id, urls, prompt=prompt):
+            from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_EDIT
             return DIRECT_DELIVERY_SUCCESS_EDIT
 
         return (
@@ -851,3 +849,24 @@ __all__ = [
     "soften_image_prompt",
     "_enhance_prompt_for_api",
 ]
+
+# Lazy module-level re-exports for DIRECT_* (used by test_guidance_centralization).
+# Prevents top-level from ..llm.prompt_builder (would risk cycles on direct media imports).
+def __getattr__(name: str):
+    mapping = {
+        "DIRECT_DELIVERY_SUCCESS_IMAGE": "DIRECT_DELIVERY_SUCCESS_IMAGE",
+        "DIRECT_DELIVERY_SUCCESS_EDIT": "DIRECT_DELIVERY_SUCCESS_EDIT",
+        "DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK": "DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK",
+    }
+    if name in mapping:
+        from ..llm.prompt_builder import (
+            DIRECT_DELIVERY_SUCCESS_IMAGE,
+            DIRECT_DELIVERY_SUCCESS_EDIT,
+            DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK,
+        )
+        return {
+            "DIRECT_DELIVERY_SUCCESS_IMAGE": DIRECT_DELIVERY_SUCCESS_IMAGE,
+            "DIRECT_DELIVERY_SUCCESS_EDIT": DIRECT_DELIVERY_SUCCESS_EDIT,
+            "DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK": DIRECT_DELIVERY_SUCCESS_POLICY_BLOCK,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

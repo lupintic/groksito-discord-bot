@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import time
 import uuid
 from io import BytesIO
@@ -117,41 +116,31 @@ async def _cleanup_expired_image_requests() -> None:
 # Discord attachment delivery
 # =============================================================================
 
+
+
 def build_image_caption(prompt: str | None = None, *, user_original: str | None = None) -> str:
-    """Short, natural caption for image delivery (no URLs).
+    """Pure direct delivery — send the media with no text.
 
-    Prefers user_original (the actual text the human typed) for the visible caption
-    so language/tone stays consistent with the user even if the model passed a
-    slightly adapted prompt to the generation API. This helps cross-server
-    consistency (no more English-primed tool prompts leaking into captions).
-    Falls back to the tool prompt if no user_original.
+    Maximum nativeness ("Grok be Grok"). Just the attachment. No hard-coded phrases,
+    no heuristics, no repeating the prompt. The media itself is the response.
     """
-    source = (user_original or prompt or "").strip()
-    short_desc = source
-    for prefix in ("un ", "una ", "el ", "la ", "los ", "las "):
-        if short_desc.lower().startswith(prefix):
-            short_desc = short_desc[len(prefix) :].strip()
-            break
-    if len(short_desc) > 70:
-        short_desc = short_desc[:67].rstrip() + "…"
-
-    options = [
-        f"Aquí tienes {short_desc}." if short_desc else "Aquí tienes la imagen.",
-        f"Generé {short_desc}." if short_desc else "Imagen generada.",
-        "Listo.",
-        "Aquí tienes la imagen que pediste.",
-        f"{short_desc}." if short_desc else "Aquí está.",
-    ]
-    return random.choice(options)
+    return ""
 
 
-def build_edit_caption() -> str:
-    return "Aquí tienes la versión editada."
+def build_edit_caption(prompt: str | None = None, *, user_original: str | None = None) -> str:
+    """Pure direct delivery — send the edited image with no text.
+
+    Maximum nativeness ("Grok be Grok"). Just the attachment, nothing else.
+    """
+    return ""
 
 
-def build_video_caption(*, from_image: bool, duration: int) -> str:
-    mode_label = "a partir de la imagen de referencia" if from_image else "generado"
-    return f"Aquí tienes el video {mode_label}. (480p, {duration}s)"
+def build_video_caption(*, from_image: bool, duration: int, prompt: str | None = None, user_original: str | None = None) -> str:
+    """Pure direct delivery — send the video with no text.
+
+    Maximum nativeness ("Grok be Grok"). Just the attachment, no robotic text.
+    """
+    return ""
 
 
 def _guess_filename(url: str, kind: str, index: int = 0) -> str:
@@ -257,7 +246,8 @@ async def deliver_media_to_message(
         return False
 
     try:
-        await orig_msg.reply(caption, files=attachments[:10], mention_author=False)
+        content = caption or None
+        await orig_msg.reply(content, files=attachments[:10], mention_author=False)
     except Exception as send_err:
         logger.error(f"{cid_prefix()}[MediaDelivery] Discord reply failed ({kind}): {send_err}")
         # This will cause sentinel not to be returned; model will likely produce a text reply (may be in English on some servers).
@@ -274,13 +264,14 @@ async def deliver_media_to_message(
         if ch_id:
             from .. import context as ctx
 
-            ctx.update_from_message(
-                channel_id=ch_id,
-                user_id=0,
-                author_name="Groksito",
-                content=caption,
-                is_bot=True,
-            )
+            if caption:
+                ctx.update_from_message(
+                    channel_id=ch_id,
+                    user_id=0,
+                    author_name="Groksito",
+                    content=caption,
+                    is_bot=True,
+                )
     except Exception:
         pass
 
