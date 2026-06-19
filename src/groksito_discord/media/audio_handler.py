@@ -32,8 +32,6 @@ from typing import Any, Optional
 import httpx
 import discord  # core dep; needed for voice message File subclass + MessageFlags
 
-from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_AUDIO
-
 # For reliable voice message delivery (flag + attachment metadata).
 # High-level reply(..., flags=...) is not always available / consistent even on 2.7.x
 # (as seen in container), so we prefer the low-level path using handle_message_parameters.
@@ -596,6 +594,11 @@ async def _tool_generate_audio(
                                 # and prevents duplicate messages) when we actually attached audio.
                                 if audio_attached:
                                     logger.info(f"{cid_prefix()}[AudioDelivery] Direct audio delivery successful for request {request_id}")
+                                    # Local/lazy import (not top-level) to break the startup circular import:
+                                    # discord/client.py (eager for /audio) → audio_handler → llm.prompt_builder
+                                    # → llm chain → media_tools → back to audio_handler (schema).
+                                    # Mirrors defensive local imports already used in this file + conversation.py.
+                                    from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_AUDIO
                                     return DIRECT_DELIVERY_SUCCESS_AUDIO
 
                                 # If we only managed to send a text note (very rare), fall through so the
@@ -776,3 +779,17 @@ async def prepare_text_from_interaction(
                 final_text = f"{final_text} [reading the message] {replied_content}"
 
     return final_text
+
+
+# Lazy module-level re-export via __getattr__.
+# This lets tests (e.g. test_guidance_centralization) and direct attribute access
+# like `audio_handler.DIRECT_DELIVERY_SUCCESS_AUDIO` continue to work *without*
+# a top-level `from ..llm.prompt_builder import ...` that would trigger the
+# circular import during early loading of discord/client.py (for /audio slash).
+# The actual constant lives in prompt_builder; we fetch it only on first access
+# (after full module initialization).
+def __getattr__(name: str):
+    if name == "DIRECT_DELIVERY_SUCCESS_AUDIO":
+        from ..llm.prompt_builder import DIRECT_DELIVERY_SUCCESS_AUDIO
+        return DIRECT_DELIVERY_SUCCESS_AUDIO
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

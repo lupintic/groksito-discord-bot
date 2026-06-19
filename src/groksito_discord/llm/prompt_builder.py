@@ -230,7 +230,9 @@ VIDEO_TOOL_DELIVERY_NOTE = (
 )
 
 VIDEO_TOOL_DESCRIPTION_FULL = (
-    "Generate a short video clip (grok-imagine-video, 480p, max 6s). "
+    "Generate a short video clip using the available Grok video generation model. "
+    "Optional parameters: resolution ('480p' or '720p', defaults to '480p' if the user does not specify), "
+    "duration in seconds (defaults to 6 if not specified by the user, up to 15). "
     "Supports text-to-video or image-to-video from a reference image in context (attached or from replied message). "
     "MUST be called for any user request like 'genera un video', 'haz video de la imagen', 'animate this', etc. "
     f"{VIDEO_TOOL_DELIVERY_NOTE} "
@@ -238,8 +240,9 @@ VIDEO_TOOL_DESCRIPTION_FULL = (
 )
 
 VIDEO_TOOL_DESCRIPTION_TINY = (
-    "Generate a short video clip (grok-imagine-video, 480p, max 6s). Use for text-to-video or image-to-video "
+    "Generate a short video clip using the available Grok video generation model. Use for text-to-video or image-to-video "
     "(when a reference image from the message or reply is provided in context). "
+    "Optional: resolution ('480p' or '720p', defaults to 480p if user does not specify), duration (default 6s, up to 15s). "
     "Call this whenever the user explicitly asks to generate, make, create, animate, or convert an image to video. "
     "You MUST call this tool instead of describing or pretending to generate the video in text. "
     "Omit aspect_ratio for image-to-video (reference image drives framing). Delivery of the result is handled automatically."

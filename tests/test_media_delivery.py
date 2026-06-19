@@ -124,7 +124,7 @@ def test_caption_builders_contain_no_urls():
     assert "http" not in build_edit_caption()
     cap = build_video_caption(from_image=False, duration=5)
     assert "http" not in cap
-    assert "480p" in cap
+    assert "480p" not in cap  # now clean, no tech specs in caption
     assert "/5" not in cap
 
 
