@@ -246,3 +246,21 @@ def test_normalize_prefers_live_guild_emojis(monkeypatch):
     # normalize accepts guild_obj and prefers live IDs
     out = emoji_registry.normalize_bot_emoji_output(":jaja: hi", "444", guild_obj=FakeGuild())
     assert "<:jaja:999>" in out
+
+
+def test_is_supported_vision_image_jpg_png_yes():
+    from groksito_discord.core.intent import is_supported_vision_image
+    att = type('A', (), {'content_type': 'image/jpeg', 'filename': 'x.png'})()
+    assert is_supported_vision_image(att) is True
+
+def test_is_supported_vision_image_gif_no():
+    from groksito_discord.core.intent import is_supported_vision_image
+    att = type('A', (), {'content_type': 'image/gif', 'filename': 'a.gif'})()
+    assert is_supported_vision_image(att) is False   # we handle via metadata only
+
+def test_is_text_attachment_detects():
+    from groksito_discord.core.intent import is_text_attachment
+    py_att = type('A', (), {'content_type': '', 'filename': 'foo.py'})()
+    assert is_text_attachment(py_att) is True
+    pdf_att = type('A', (), {'content_type': 'application/pdf', 'filename': 'r.pdf'})()
+    assert is_text_attachment(pdf_att) is False

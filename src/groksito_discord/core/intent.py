@@ -509,6 +509,48 @@ def referenced_has_media_attachments(message: Any | None) -> bool:
     return False
 
 
+# === Vision + attachment helpers for "see all files" (2026-06-20 feature) ===
+# Primary = content_type. Fallback to common extensions so Discord mis-reported
+# MIME types (common for GIFs, WebP from mobile) still work for metadata.
+# Only jpg/jpeg/png go to actual native vision input_image per xAI limits.
+_VISION_SUPPORTED_IMAGE_CT_PREFIXES = ("image/jpeg", "image/jpg", "image/png")
+_VISION_SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png")
+_TEXT_ATTACHMENT_EXTS = (
+    ".txt", ".md", ".markdown", ".py", ".js", ".ts", ".json", ".csv",
+    ".log", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".sh", ".bat",
+)
+_TEXT_INLINE_MAX_BYTES = 64 * 1024  # 64 KiB safety cap for inlining (small files only)
+
+def is_supported_vision_image(att: Any) -> bool:
+    """Return True only for formats we will send as input_image to xAI vision."""
+    if not att:
+        return False
+    ct = (getattr(att, "content_type", "") or "").lower()
+    if any(ct.startswith(p) for p in _VISION_SUPPORTED_IMAGE_CT_PREFIXES):
+        return True
+    filename = (getattr(att, "filename", "") or "").lower()
+    return any(filename.endswith(ext) for ext in _VISION_SUPPORTED_IMAGE_EXTS)
+
+def is_text_attachment(att: Any) -> bool:
+    """Small text-like files we may safely inline content for."""
+    if not att:
+        return False
+    ct = (getattr(att, "content_type", "") or "").lower()
+    if ct.startswith("text/"):
+        return True
+    filename = (getattr(att, "filename", "") or "").lower()
+    return any(filename.endswith(ext) for ext in _TEXT_ATTACHMENT_EXTS)
+
+def get_attachment_meta(att: Any) -> dict[str, Any]:
+    """Lightweight dict for prompt injection. Never include secrets or huge data."""
+    return {
+        "filename": getattr(att, "filename", "") or "unknown",
+        "content_type": getattr(att, "content_type", "") or "",
+        "size": getattr(att, "size", 0) or 0,
+        "url": getattr(att, "url", ""),
+    }
+
+
 def _has_strong_directed_reply_intent(text: str | None) -> bool:
     """Conservative: only strong targeted signals + bot name wake on replies to others."""
     if not text:
