@@ -35,6 +35,10 @@ from .intent import (
     _has_strong_directed_reply_intent,
     _has_recent_referent_intent,
     referenced_has_media_attachments,
+    is_supported_vision_image,
+    is_text_attachment,
+    get_attachment_meta,
+    _TEXT_INLINE_MAX_BYTES,
 )
 
 logger = logging.getLogger("groksito.conversation")
@@ -318,6 +322,108 @@ async def _fetch_reply_chain_context(
     return contexts
 
 
+async def _maybe_fetch_text_content(att: Any, cid_p: str) -> str | None:
+    """Fetch small text attachment content for inlining. Returns truncated str or None."""
+    try:
+        size = getattr(att, "size", 0) or 0
+        if size > _TEXT_INLINE_MAX_BYTES or size <= 0:
+            return None
+        url = getattr(att, "url", None)
+        if not url:
+            return None
+        import httpx
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            text = resp.text[:4000]  # hard truncate for prompt safety
+            if len(text) < 10:
+                return None
+            return text
+    except Exception as fetch_err:
+        logger.debug(f"{cid_p}[Vision] text inline fetch skipped: {fetch_err}")
+        return None
+
+
+async def _extract_gif_frames_as_vision_urls(attachment_url: str, cid_p: str, num_frames: int = 3, max_bytes: int = 15 * 1024 * 1024) -> list[str]:
+    """Extract up to 3 representative frames (start, middle, end) from GIF/WebP as PNG data URIs.
+    Much better than single first frame (which is often black).
+    Uses temp file for reliable ffmpeg processing.
+    Returns list of 'data:image/png;base64,...'
+    """
+    if num_frames < 1:
+        return []
+    import tempfile
+    import os
+    tmp_path = None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(attachment_url, follow_redirects=True)
+            resp.raise_for_status()
+            if len(resp.content) > max_bytes:
+                logger.debug(f"{cid_p}[Vision] attachment too large for frame extraction")
+                return []
+            media_bytes = resp.content
+
+        import subprocess
+        import base64
+
+        # Write to temp file for reliable ffmpeg/ffprobe (pipe can be flaky for some GIFs)
+        with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as tmp:
+            tmp.write(media_bytes)
+            tmp_path = tmp.name
+
+        # Probe duration
+        duration = 2.0
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", tmp_path],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if probe.returncode == 0 and probe.stdout.strip():
+                duration = max(0.1, float(probe.stdout.strip()))
+        except Exception:
+            pass
+
+        positions = [0.0]
+        if num_frames >= 2:
+            positions.append(duration / 2.0)
+        if num_frames >= 3:
+            positions.append(max(0.05, duration - 0.2))
+        positions = sorted(set(positions))[:num_frames]
+
+        frames: list[str] = []
+        for t in positions:
+            cmd = [
+                "ffmpeg", "-ss", str(t), "-i", tmp_path,
+                "-frames:v", "1",
+                "-f", "image2pipe",
+                "-vcodec", "png",
+                "-y", "pipe:1"
+            ]
+            proc = subprocess.run(cmd, capture_output=True, timeout=10)
+            if proc.returncode == 0 and proc.stdout:
+                b64 = base64.b64encode(proc.stdout).decode("ascii")
+                frames.append(f"data:image/png;base64,{b64}")
+
+        if frames:
+            logger.info(f"{cid_p}[Vision] Extracted {len(frames)} frames from GIF for vision (better than single black frame)")
+        else:
+            logger.debug(f"{cid_p}[Vision] No frames extracted from GIF")
+        return frames
+    except Exception as conv_err:
+        logger.debug(f"{cid_p}[Vision] GIF frame extraction skipped: {conv_err}")
+        return []
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
 async def _harvest_vision_images(
     message: Any,
     referenced: Any | None,
@@ -326,37 +432,43 @@ async def _harvest_vision_images(
     has_x_link_intent: bool = False,  # also used to decide chain traversal for link-heavy replies
     is_mentioned: bool = False,
     user_text: str = "",
-) -> list[str]:
-    """Harvests image URLs for Vision from current message, referenced message, reply chain if needed,
-    and (lightweight) recent channel messages when directly @mentioned + the query refers to a recent
-    user post / image (no Discord reply used).
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Harvests image URLs (supported vision only) + full attachment metadata for current + referenced.
 
-    The recent-channel path is intentionally gated and small-cap so it only activates when needed
-    (direct address + clear reference language like "el usuario", "la imagen", "arriba", "el post anterior",
-    "what the user posted", "the image", etc.). This lets Grok use reasoning over recent context
-    while staying lightweight.
-
-    Attachment images from the *referenced* message are now harvested on any reply_continuation
-    (once the strict activation guard allowed us to reach this point). This greatly improves
-    reliability when users reply to messages containing images (friend posts, screenshots, etc.)
-    and wake the bot via mention or strong directed signals ΓÇö even if they didn't use one of the
-    explicit "qu├⌐ ves en esta / edita esta" phrases.
-
-    explicit_visual_reply_intent + has_x_link_intent still gate the more specific "text-extracted
-    previous Grok image URLs" (the "la que generaste" cases) and deep chain traversal.
-
-    Image *creation* intent (stricter) is separate and only controls tool schema offering upstream.
+    Always collects ALL attachments via get_attachment_meta (for later prompt context).
+    Only jpg/png (via is_supported_vision_image) go into image_urls for native vision.
+    Small text attachments on *current* message only: fetch + inline as "text_content".
+    Other logic (chain, recent, filter_unreliable, caps) preserved for images.
     """
     cid_p = cid_prefix()  # ensure cid prefix for logs in helper (correlation contextvar; prevents NameError)
     image_urls: list[str] = []
+    attachments: list[dict[str, Any]] = []
 
-    # Current message attachments (rare for vision replies, but supported)
+    # Current message attachments (always collect full meta for context; only supported for vision)
     for att in getattr(message, "attachments", []) or []:
-        if getattr(att, "content_type", "").startswith("image/"):
-            u = att.url
-            if u not in image_urls:
+        meta = get_attachment_meta(att)
+        # Text inline only for current message small text atts
+        if is_text_attachment(att):
+            text = await _maybe_fetch_text_content(att, cid_p)
+            if text:
+                meta = dict(meta)  # copy
+                meta["text_content"] = text
+                logger.debug(f"{cid_p}[Vision] Inlined text content for current attachment: {meta.get('filename')}")
+        attachments.append(meta)
+        if is_supported_vision_image(att):
+            u = getattr(att, "url", None) or meta.get("url")
+            if u and u not in image_urls:
                 image_urls.append(u)
-                logger.debug(f"{cid_p}[Vision] Image URL from attachment (current msg): {u[:70]}...")
+                logger.debug(f"{cid_p}[Vision] Image URL from attachment (current msg, supported): {u[:70]}...")
+        else:
+            # Workaround for GIFs / WebP etc: extract start/middle/end frames as PNG data URIs
+            ct = (getattr(att, "content_type", "") or "").lower()
+            fn = (getattr(att, "filename", "") or "").lower()
+            if "gif" in ct or fn.endswith(".gif") or "webp" in ct or fn.endswith(".webp"):
+                for vurl in await _extract_gif_frames_as_vision_urls(getattr(att, "url", ""), cid_p, num_frames=3):
+                    if vurl and vurl not in image_urls:
+                        image_urls.append(vurl)
+                logger.debug(f"{cid_p}[Vision] Added up to 3 GIF frames as PNG data URIs for vision")
 
     # Direct referenced message: attachments + text extraction (primary path)
     #
@@ -370,14 +482,23 @@ async def _harvest_vision_images(
     # Text-extracted Grok-generated image URLs (grok-imagine etc) remain gated behind
     # explicit visual / x-intent for the "la que generaste" follow-up cases.
     if referenced and is_reply_continuation:
-        # Attachment images from referenced ΓÇö include for any activated reply.
+        # Attachment images from referenced ΓÇö include for any activated reply (now using supported filter).
         # (Activation policy + STRONG keywords already protect from random user-to-user.)
         for att in getattr(referenced, "attachments", []) or []:
-            if getattr(att, "content_type", "").startswith("image/"):
-                u = att.url
-                if u not in image_urls:
+            meta = get_attachment_meta(att)  # collect using helper for referenced too
+            attachments.append(meta)
+            if is_supported_vision_image(att):
+                u = getattr(att, "url", None) or meta.get("url")
+                if u and u not in image_urls:
                     image_urls.append(u)
-                    logger.debug(f"{cid_p}[Vision] Image URL from attachment (referenced): {u[:70]}...")
+                    logger.debug(f"{cid_p}[Vision] Image URL from attachment (referenced, supported): {u[:70]}...")
+            else:
+                ct = (getattr(att, "content_type", "") or "").lower()
+                fn = (getattr(att, "filename", "") or "").lower()
+                if "gif" in ct or fn.endswith(".gif") or "webp" in ct or fn.endswith(".webp"):
+                    for vurl in await _extract_gif_frames_as_vision_urls(getattr(att, "url", ""), cid_p, num_frames=3):
+                        if vurl and vurl not in image_urls:
+                            image_urls.append(vurl)
 
         # Text-based extraction (bot image links in the referenced text) ΓÇö keep stricter.
         if is_reply_continuation and (explicit_visual_reply_intent or has_x_link_intent):
@@ -480,10 +601,33 @@ async def _harvest_vision_images(
     if len(image_urls) < raw_count:
         logger.info(f"{cid_p}[Vision] Filtered {raw_count - len(image_urls)} unreliable image URL(s) (X/Twitter previews or Discord link-embed proxies) to prevent 404 on vision; using text + x_search fallback")
 
+    # Final filter: only supported vision formats (jpg/png) or our data: URIs from GIF frame extraction.
+    # This prevents raw .gif / .webp URLs (from chain, text extract, or old code) from reaching the API and causing 400s.
+    def _is_vision_compatible(u: str) -> bool:
+        if not u:
+            return False
+        if u.startswith("data:image/"):
+            return True
+        try:
+            p = u.lower().split("?", 1)[0].split("#", 1)[0]
+            return p.endswith((".jpg", ".jpeg", ".png"))
+        except Exception:
+            return False
+    image_urls = [u for u in image_urls if _is_vision_compatible(u)]
+
     if image_urls:
         logger.info(f"{cid_p}[Vision] Total image URLs harvested for this turn: {len(image_urls)} (reply_continuation={is_reply_continuation}, mentioned={is_mentioned})")
 
-    return image_urls[:5]  # Safety cap
+    if attachments:
+        n_text = sum(1 for a in attachments if "text_content" in a)
+        n_vision = sum(
+            1 for a in attachments
+            if (str(a.get("content_type", "")).lower().startswith(("image/jpeg", "image/png")))
+            or str(a.get("filename", "")).lower().endswith((".jpg", ".jpeg", ".png"))
+        )
+        logger.info(f"{cid_p}{len(attachments)} attachments harvested ({n_vision} vision, {n_text} text inlined)")
+
+    return image_urls[:5], attachments  # images for back-compat paths; attachments always for context
 
 
 async def _invoke_groksito(
@@ -516,13 +660,15 @@ async def _invoke_groksito(
 
     # Harvest vision images if relevant (now with intelligent chain support for replies + link intent)
     # Also lightweight recent images on direct mentions when referring to recent user posts/images.
-    image_urls = await _harvest_vision_images(
+    # Now also receives full attachments list (current + referenced) with possible text_content for small files.
+    image_urls, attachments = await _harvest_vision_images(
         message, referenced, explicit_visual_reply_intent,
         is_reply_continuation=is_reply_continuation,
         has_x_link_intent=has_x_link_intent,
         is_mentioned=is_mentioned,
         user_text=user_message,
     )
+    # attachments: list of meta dicts for current msg (always) + ref when reply_cont; now passed to call_grok_with_tools for llm_input block + vision guard.
 
     # Deeper text chain walking for referent resolution.
     # When there's a reply chain (or on mention with referent language), fetch ancestors
@@ -550,12 +696,14 @@ async def _invoke_groksito(
         # Real call to the LLM layer (now connected to xAI Responses API + tools).
         # We pass has_image_creation_intent (strict; now includes video-from-ref for offering parity)
         # for media tool offering; images for vision are handled separately.
+        # attachments from harvest wired here (Task 5) so metadata for all types reaches build_responses_input / model.
         response_text = await call_grok_with_tools(
             user_message=user_message,
             author_name=author_display,
             channel_id=message.channel.id,
             original_message=message,
             image_urls=image_urls,
+            attachments=attachments,
             referenced_context=referenced_context,
             reply_chain_contexts=chain_contexts,  # deeper ancestors for text referents (YouTube, "what the user said", etc.)
             has_visual_intent=has_image_creation_intent,

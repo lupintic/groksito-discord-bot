@@ -150,10 +150,89 @@ async def test_vision_404_retry_succeeds_without_images(monkeypatch):
         author_name="tester",
         channel_id=99,
         image_urls=[image_url],
+        attachments=[],  # extended for Task 4: attachments threaded (empty here keeps compat)
         is_mentioned=True,
     )
 
     assert result == "Es un meme gracioso."
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_non_404_gif_trouble_retries_with_attachments_metadata(monkeypatch):
+    """Non-404 vision/processing trouble on GIF should retry once with image_urls=[] but attachments kept, succeed using metadata."""
+    from groksito_discord.llm.client import call_grok_for_groksito
+
+    gif_url = "https://cdn.discordapp.com/attachments/1/2/funny.gif"
+    gif_att = {"filename": "funny.gif", "content_type": "image/gif", "size": 234567}
+
+    async def fake_build_responses_input(**kwargs):
+        has_imgs = bool(kwargs.get("image_urls"))
+        atts = kwargs.get("attachments") or []
+        if has_imgs:
+            content = [{"type": "input_image", "image_url": gif_url}]
+        else:
+            # metadata present on retry
+            content = f"describe the gif\n\n[Attachments sent with this message:\n- funny.gif (image/gif, 229.1KB)\n]"
+        return {
+            "initial_input": [{"role": "user", "content": content}],
+            "stable_prefix_len": 50,
+            "need": "normal",
+            "user_id": "1",
+            "user_message_text": "describe the gif",
+        }
+
+    monkeypatch.setattr(
+        "groksito_discord.llm.client.build_responses_input",
+        fake_build_responses_input,
+    )
+    monkeypatch.setattr(
+        "groksito_discord.llm.client._get_grok_bearer",
+        lambda: "fake-test-bearer",
+    )
+    success_response = MagicMock()
+    success_response.output_text = "I see the attached funny.gif (image/gif). Vision is limited to JPG/PNG so I rely on metadata."
+    success_response.output = []
+    success_response.usage = MagicMock(input_tokens=30)
+
+    call_count = 0
+
+    async def flaky_responses_call(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        inp = kwargs.get("input") or (args[0] if args else None)
+        images_present = False
+        try:
+            # Detect "when images present" per spec: look for input_image blocks in first-turn input
+            for item in (inp or []):
+                c = item.get("content") if isinstance(item, dict) else None
+                if isinstance(c, list) and any(
+                    isinstance(ii, dict) and ii.get("type") == "input_image" for ii in c
+                ):
+                    images_present = True
+                    break
+        except Exception:
+            pass
+        if call_count == 1 and images_present:
+            # non-404 processing trouble (e.g. GIF vision rejection)
+            raise RuntimeError("processing error while handling attached GIF")
+        return success_response
+
+    monkeypatch.setattr(
+        "groksito_discord.llm.client._call_responses_with_retry",
+        flaky_responses_call,
+    )
+
+    result = await call_grok_for_groksito(
+        user_message="describe the gif",
+        author_name="tester",
+        channel_id=99,
+        image_urls=[gif_url],
+        attachments=[gif_att],
+        is_mentioned=True,
+    )
+
+    assert result == "I see the attached funny.gif (image/gif). Vision is limited to JPG/PNG so I rely on metadata."
     assert call_count == 2
 
 
@@ -246,3 +325,83 @@ def test_normalize_prefers_live_guild_emojis(monkeypatch):
     # normalize accepts guild_obj and prefers live IDs
     out = emoji_registry.normalize_bot_emoji_output(":jaja: hi", "444", guild_obj=FakeGuild())
     assert "<:jaja:999>" in out
+
+
+def test_is_supported_vision_image_jpg_png_yes():
+    from groksito_discord.core.intent import is_supported_vision_image
+    att = type('A', (), {'content_type': 'image/jpeg', 'filename': 'x.png'})()
+    assert is_supported_vision_image(att) is True
+
+def test_is_supported_vision_image_gif_no():
+    from groksito_discord.core.intent import is_supported_vision_image
+    att = type('A', (), {'content_type': 'image/gif', 'filename': 'a.gif'})()
+    assert is_supported_vision_image(att) is False   # we handle via metadata only
+
+def test_is_text_attachment_detects():
+    from groksito_discord.core.intent import is_text_attachment
+    py_att = type('A', (), {'content_type': '', 'filename': 'foo.py'})()
+    assert is_text_attachment(py_att) is True
+    pdf_att = type('A', (), {'content_type': 'application/pdf', 'filename': 'r.pdf'})()
+    assert is_text_attachment(pdf_att) is False
+
+
+# =============================================================================
+# TDD for Task 2: harvest now returns (images, attachments) and collects all + filters vision + inlines text
+# =============================================================================
+
+from types import SimpleNamespace
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_harvest_returns_attachments_and_filters_to_supported_vision_only():
+    """Failing test (TDD) for enhanced harvest: must collect ALL attachments meta for current,
+    only supported images (jpg/png) go to image_urls, text attachments considered for inline (fetch may skip).
+    """
+    from groksito_discord.core.conversation import _harvest_vision_images
+
+    att_jpg = SimpleNamespace(
+        content_type="image/jpeg", filename="photo.jpg", url="https://cdn.example.com/photo.jpg", size=12345
+    )
+    att_gif = SimpleNamespace(
+        content_type="image/gif", filename="anim.gif", url="https://cdn.example.com/anim.gif", size=9999
+    )
+    att_py = SimpleNamespace(
+        content_type="text/x-python", filename="script.py", url="https://cdn.example.com/script.py", size=200
+    )
+    att_pdf = SimpleNamespace(
+        content_type="application/pdf", filename="doc.pdf", url="https://cdn.example.com/doc.pdf", size=5000
+    )
+
+    msg = SimpleNamespace(attachments=[att_jpg, att_gif, att_py, att_pdf], content="")
+
+    # Call with no referenced, no special intent -> should still collect current attachments
+    result = await _harvest_vision_images(
+        message=msg,
+        referenced=None,
+        explicit_visual_reply_intent=False,
+        is_reply_continuation=False,
+        has_x_link_intent=False,
+        is_mentioned=False,
+        user_text="",
+    )
+
+    # This will fail until harvest refactored to return tuple (images, attachments)
+    image_urls, attachments = result
+
+    # All 4 attachments must be present via meta (new behavior)
+    assert len(attachments) == 4
+    filenames = [a.get("filename") for a in attachments]
+    assert "photo.jpg" in filenames
+    assert "anim.gif" in filenames
+    assert "script.py" in filenames
+    assert "doc.pdf" in filenames
+
+    # Only the supported vision image (jpg) should be in image_urls (gif filtered by is_supported_vision_image)
+    assert len(image_urls) == 1
+    assert "photo.jpg" in str(image_urls[0]) or image_urls[0].endswith("photo.jpg")  # url contains
+
+    # For text att, if inline happened meta would have text_content; fetch uses fake url so may be absent (graceful)
+    # Main point of test: attachments list is returned and populated.
+    assert any(a.get("filename") == "script.py" for a in attachments)

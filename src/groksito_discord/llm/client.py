@@ -211,6 +211,7 @@ async def _prepare_first_turn_data(
     channel_id: int,
     original_message: Any,
     image_urls: list[str] | None,
+    attachments: list[dict] | None = None,
     referenced_context: dict | None,
     reply_chain_contexts: list[dict] | None,
     is_reply_continuation: bool,
@@ -243,6 +244,7 @@ async def _prepare_first_turn_data(
         channel_id=channel_id,
         original_message=original_message,
         image_urls=image_urls,
+        attachments=attachments,
         referenced_context=referenced_context,
         reply_chain_contexts=reply_chain_contexts,
         is_reply_continuation=is_reply_continuation,
@@ -610,6 +612,7 @@ async def call_grok_for_groksito(
     channel_id: int,
     original_message: Any = None,
     image_urls: list[str] | None = None,
+    attachments: list[dict] | None = None,
     referenced_context: dict | None = None,
     reply_chain_contexts: list[dict] | None = None,  # deeper reply ancestors for text referents (links, "what the user said", etc.)
     has_visual_intent: bool = False,
@@ -675,6 +678,7 @@ async def call_grok_for_groksito(
             channel_id=channel_id,
             original_message=original_message,
             image_urls=image_urls,
+            attachments=attachments,
             referenced_context=referenced_context,
             reply_chain_contexts=reply_chain_contexts,
             is_reply_continuation=is_reply_continuation,
@@ -758,19 +762,33 @@ async def call_grok_for_groksito(
                 extra_body={"prompt_cache_key": cache_key},
             )
         except Exception as api_err:
-            if is_image_fetch_404_error(api_err, has_images=bool(image_urls)):
-                logger.warning(
-                    f"{cid_p}[LLM][VISION] Image fetch 404 from xAI backend for {len(image_urls)} provided URL(s). "
-                    f"These were likely stale Discord signed attachment URLs or transient embed previews from recent channel history. "
-                    f"Retrying first turn WITHOUT images so the response can still succeed using text + tools (e.g. x_search for X links)."
-                )
+            is_404 = is_image_fetch_404_error(api_err, has_images=bool(image_urls))
+            has_media = bool(image_urls) or bool(attachments)
+            if is_404 or has_media:
+                # Generalized retry path (Task 4): 404 for images OR any trouble when attachments (or image_urls) present.
+                # Rebuild with image_urls=[] but attachments kept (metadata injected for GIFs, PDFs, text files, unsupported images etc).
+                # This gives the model a chance via the attachments block instead of hard fail/canned.
+                if is_404:
+                    logger.warning(
+                        f"{cid_p}[LLM][VISION] Image fetch 404 from xAI backend for {len(image_urls or [])} provided URL(s). "
+                        f"These were likely stale Discord signed attachment URLs or transient embed previews from recent channel history. "
+                        f"Retrying first turn WITHOUT images (attachments metadata preserved if any)."
+                    )
+                else:
+                    logger.warning(
+                        f"{cid_p}[LLM][ATTACHMENTS] Responses API first-turn trouble (non-404 processing error, e.g. GIF/unsupported) "
+                        f"with attachments={len(attachments or [])} (image_urls={len(image_urls or [])}). "
+                        f"Retrying with image_urls cleared but attachments kept so model receives metadata."
+                    )
                 try:
-                    # Rebuild via the single authoritative build_responses_input (text-only path).
+                    # Rebuild via the single authoritative build_responses_input.
+                    # Preserve attachments for metadata; clear only vision urls.
                     plain_input_data = await build_responses_input(
                         user_message=user_message,
                         channel_id=channel_id,
                         original_message=original_message,
                         image_urls=[],
+                        attachments=attachments,
                         referenced_context=referenced_context,
                         reply_chain_contexts=reply_chain_contexts,
                         is_reply_continuation=is_reply_continuation,
@@ -790,31 +808,13 @@ async def call_grok_for_groksito(
                         ],
                         extra_body={"prompt_cache_key": cache_key},
                     )
-                    # Success on retry: clear the image flag so downstream logging/metrics treat this as non-vision.
+                    # Success on retry: clear ONLY vision urls. Metadata from attachments is already in the rebuilt input.
                     image_urls = []
-                    logger.info(f"{cid_p}[LLM][VISION] First-turn retry without images succeeded after fetch failure.")
+                    logger.info(f"{cid_p}[LLM][ATTACHMENTS] First-turn retry with attachments (images cleared) succeeded.")
                 except Exception as retry_err:
-                    logger.error(f"{cid_p}[LLM][VISION] Retry without images also failed: {retry_err}")
-                    # Fall through to original hard error path below (will produce the "describe the image" user message).
-                    if image_urls:
-                        logger.error(
-                            f"{cid_p}[LLM][VISION] Responses API call FAILED while sending {len(image_urls)} image(s). "
-                            f"Model={model}. Error: {api_err}"
-                        )
-                        raise RuntimeError(
-                            f"Vision request to xAI Responses API failed (likely payload format or 4xx). "
-                            f"Images: {len(image_urls)}. Original error: {api_err}"
-                        ) from api_err
+                    logger.error(f"{cid_p}[LLM][ATTACHMENTS] Retry without images also failed: {retry_err}")
+                    # Raise (will reach outer except); we guard canned message when attachments present (model had metadata chance on retry).
                     raise
-            elif image_urls:
-                logger.error(
-                    f"{cid_p}[LLM][VISION] Responses API call FAILED while sending {len(image_urls)} image(s). "
-                    f"Model={model}. Error: {api_err}"
-                )
-                raise RuntimeError(
-                    f"Vision request to xAI Responses API failed (likely payload format or 4xx). "
-                    f"Images: {len(image_urls)}. Original error: {api_err}"
-                ) from api_err
             else:
                 raise
 
@@ -897,13 +897,20 @@ async def call_grok_for_groksito(
     except Exception as e:
         logger.exception(f"{cid_p}Error during real Responses API call + tool loop")
 
-        if image_urls:
+        if image_urls and not attachments:
+            # Guard: only use legacy vision canned when no attachments metadata present.
+            # When attachments provided (even with images), retry path (generalized) gives model metadata chance;
+            # do not short-circuit to image-specific canned message.
             logger.warning(f"{cid_p}[LLM][VISION] Failing request had {len(image_urls)} image(s) attached.")
             return (
                 "Tuve problemas procesando la(s) imagen(es) que enviaste. "
                 "El servicio de visi├│n de Grok est├í teniendo dificultades con este archivo en este momento. "
                 "Por favor, describe lo que ves en la imagen con palabras y te ayudo con eso."
             )
+
+        if attachments:
+            logger.warning(f"{cid_p}[LLM][ATTACHMENTS] Failing request had {len(attachments)} attachment(s) (metadata was available on first/retry turn).")
+            # Fall through: use generic classification + final message below (more generic than vision canned).
 
         # Lightweight classification for common transient/user-facing cases (after retries exhausted in helper)
         if isinstance(e, (RateLimitError,)) or "rate" in str(e).lower() or "429" in str(e).lower():

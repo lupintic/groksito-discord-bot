@@ -748,7 +748,6 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
     from ..core.conversation import (
         _resolve_referenced_and_activation,
         _build_referenced_context,
-        _harvest_vision_images,
         _invoke_groksito,
     )
 

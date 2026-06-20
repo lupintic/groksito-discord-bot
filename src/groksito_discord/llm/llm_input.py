@@ -78,11 +78,15 @@ class ResponsesInputData(TypedDict):
 def _build_multimodal_user_content(
     user_message: str,
     image_urls: list[str] | None,
+    attachments: list[dict] | None = None,
 ) -> list[dict] | str:
     """Construct the user message content for the Responses API.
 
     Plain string when no images; otherwise multimodal input_text + input_image blocks.
     Vision URLs pass through filter_unreliable_vision_urls as a last-mile guard (#40).
+    attachments param accepted (for signature parity with builder) but block injection
+    handled in build_responses_input so that attachments always prepend early (before
+    context_note) and work for both plain and multimodal cases.
     """
     if not image_urls:
         return user_message or ""
@@ -252,6 +256,101 @@ def _build_emoji_block_if_addressed(
         return ""
 
 
+def _format_attachment_size(num_bytes: Any) -> str:
+    """Human-readable size (e.g. 2.3MB, 4.1KB) matching design examples. Safe on bad input."""
+    try:
+        b = int(num_bytes or 0)
+    except Exception:
+        b = 0
+    if b <= 0:
+        return ""
+    if b >= 1024 * 1024:
+        return f"{b / (1024 * 1024):.1f}MB"
+    if b >= 1024:
+        return f"{b / 1024:.1f}KB"
+    return f"{b}B"
+
+
+def _guess_fence_lang(filename: str, content_type: str) -> str:
+    """Lightweight fence lang hint for text_content (python, json etc). Empty ok."""
+    fn = (filename or "").lower()
+    ct = (content_type or "").lower()
+    if fn.endswith(".py") or "python" in ct:
+        return "python"
+    if fn.endswith(".js") or "javascript" in ct:
+        return "javascript"
+    if fn.endswith(".ts"):
+        return "typescript"
+    if fn.endswith(".json"):
+        return "json"
+    if fn.endswith((".md", ".markdown")):
+        return "markdown"
+    if fn.endswith((".yml", ".yaml")):
+        return "yaml"
+    if fn.endswith(".sh") or "shell" in ct or "bash" in ct:
+        return "bash"
+    if fn.endswith(".html") or "html" in ct:
+        return "html"
+    if fn.endswith(".css"):
+        return "css"
+    if fn.endswith(".log"):
+        return "log"
+    return ""
+
+
+def _build_attachments_block(attachments: list[dict] | None) -> str:
+    """New private builder (Task 3).
+
+    Produces the exact compact block per design spec:
+    [Attachments sent with this message:
+    - funny.gif (image/gif, 2.3MB)
+    - main.py (text/x-python, 4.1KB)
+      ```python
+      ...
+      ```
+    - report.pdf (application/pdf, 1.4MB)
+    ]
+
+    - Always metadata for all attachments (current + some refs).
+    - If "text_content" present (small text files from harvest), show indented fenced snippet.
+    - Truncates over-long text_content defensively + adds note.
+    - Safe, no secrets (size/format already from meta).
+    - Vision images listed here for filename awareness (separate input_image still added).
+    - Language neutral header; folded into user content (cache friendly).
+    """
+    if not attachments:
+        return ""
+    lines: list[str] = ["[Attachments sent with this message:"]
+    for a in attachments:
+        if not isinstance(a, dict):
+            continue
+        filename = str(a.get("filename") or "unknown").strip() or "unknown"
+        content_type = str(a.get("content_type") or "").strip()
+        size_str = _format_attachment_size(a.get("size"))
+        if content_type and size_str:
+            meta = f"{content_type}, {size_str}"
+        elif content_type:
+            meta = content_type
+        elif size_str:
+            meta = size_str
+        else:
+            meta = ""
+        line = f"- {filename} ({meta})" if meta else f"- {filename}"
+        lines.append(line)
+
+        tc = a.get("text_content")
+        if isinstance(tc, str) and tc.strip():
+            display = tc.strip()
+            if len(display) > 2000:
+                display = display[:2000] + "\n... [truncated for context]"
+            lang = _guess_fence_lang(filename, content_type)
+            fence = f"  ```{lang}\n{display}\n  ```"
+            lines.append(fence)
+    lines.append("]")
+
+    return "\n".join(lines)
+
+
 async def build_responses_input(
     *,
     user_message: str,
@@ -265,6 +364,7 @@ async def build_responses_input(
     image_gen_intent: bool = False,
     is_reply_to_bot: bool = False,   # Direct reply to one of our messages
     is_mentioned: bool = False,      # Direct @mention of the bot (strong address signal; also enables referenced context + recent summary)
+    attachments: list[dict] | None = None,  # from harvest: current (+ref on continuations); may include "text_content" for small text files
 ) -> dict[str, Any]:
     """
     The single, correct, non-duplicated input builder for the first Responses API call.
@@ -321,6 +421,11 @@ async def build_responses_input(
         image_gen_intent=image_gen_intent,
     )
 
+    # Attachments block (new for Task 3): metadata + optional text_content for small files.
+    # Computed here, prepended early (before [R:]/emoji context_note) into user content.
+    # Gated for pure image/video gen paths (like emoji block) to keep input minimal.
+    attachments_block = _build_attachments_block(attachments) if attachments and not image_gen_intent else ""
+
     try:
         injected_chars = len(dynamic_context_block)
         injected_tokens = max(30, injected_chars // 4)
@@ -333,7 +438,7 @@ async def build_responses_input(
     except Exception:
         pass
 
-    user_content = _build_multimodal_user_content(user_message, image_urls)
+    user_content = _build_multimodal_user_content(user_message, image_urls, attachments=attachments)
 
     # Exactly ONE system message: the fixed SYSTEM_PROMPT.
     # This guarantees an identical leading prefix for every first-turn under the
@@ -352,14 +457,19 @@ async def build_responses_input(
 
     # Build tiny optional context note (dynamic ref + compact emoji header).
     # Both are already gated to addressed turns inside their builders.
+    # Attachments block (if present) is prepended BEFORE the ref/emoji note, per design
+    # (it's "Attachments sent with this message", most immediate to current turn content).
     context_prefix_parts: list[str] = []
+    if attachments_block:
+        context_prefix_parts.append(attachments_block)
     if dynamic_context_block:
         context_prefix_parts.append(dynamic_context_block)
     if emoji_full_block:
         context_prefix_parts.append(emoji_full_block)
     context_note = "\n\n".join(context_prefix_parts).strip()
 
-    # Prepend context note into user_content (str or multimodal list).
+    # Prepend context note (now may include attachments_block prepended to it) into
+    # user_content (handles both str case and multimodal list case for vision).
     if context_note:
         if isinstance(user_content, list):
             # Multimodal path (vision). Put note as the first text block.
