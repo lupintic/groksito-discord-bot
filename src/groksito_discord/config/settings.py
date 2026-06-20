@@ -82,6 +82,13 @@ class GroksitoSettings(BaseSettings):
             "xAI SDK default is 10 minutes; 720p/15s jobs often exceed 5 minutes."
         ),
     )
+    discord_max_upload_bytes: int = Field(
+        default=25 * 1024 * 1024,
+        description=(
+            "Max Discord bot attachment size in bytes (API hard cap is 25 MB). "
+            "Oversized videos fall back to a direct xAI CDN link."
+        ),
+    )
 
     # -------------------------------------------------------------------------
     # Experimental: Grok auth via SuperGrok / X Premium+ OAuth (no API key)
