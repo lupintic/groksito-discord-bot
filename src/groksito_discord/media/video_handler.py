@@ -217,6 +217,15 @@ def _enhance_video_prompt(prompt: str, is_from_image: bool = False) -> str:
 # Video Polling (improved logging + resilience)
 # =============================================================================
 
+def _video_poll_max_wait_seconds(*, duration: int = 6, resolution: str = "480p") -> int:
+    """Wall-clock budget for polling xAI video jobs (aligned with xAI SDK 10m default)."""
+    base = int(getattr(settings, "video_poll_max_wait_seconds", 600))
+    bonus = max(0, duration - 6) * 20
+    if str(resolution).lower() == "720p":
+        bonus += 120
+    return max(base, 300 + bonus)
+
+
 async def _poll_for_video_completion(
     http_client: httpx.AsyncClient,
     request_id: str,
@@ -252,16 +261,17 @@ async def _poll_for_video_completion(
             if sc < 400:
                 # 2xx (incl. 200 success + 202 Accepted) and 3xx are non-error responses
                 consecutive_bad = 0
-                if sc == 200:
-                    status = str((data or {}).get("status", "")).lower().strip()
-                    if status == "done":
-                        return "succeeded", data
-                    elif status in ["failed", "expired"]:
-                        return "failed", data
-                    # still processing/queued/unknown -> continue polling
-                    if poll_count <= 2 or poll_count % 6 == 0:
-                        logger.debug(f"{cid_prefix()}[Video] poll #{poll_count} for {request_id}: status={status or 'unknown'}")
-                # 202/204 etc: in-progress, just fall through to sleep
+                status = str((data or {}).get("status", "")).lower().strip()
+                if status == "done":
+                    return "succeeded", data
+                if status in ("failed", "expired"):
+                    return "failed", data
+                # pending / empty body on 202 -> continue polling
+                if poll_count <= 2 or poll_count % 6 == 0:
+                    logger.debug(
+                        f"{cid_prefix()}[Video] poll #{poll_count} for {request_id}: "
+                        f"http={sc} status={status or 'unknown'}"
+                    )
             else:
                 consecutive_bad += 1
                 logger.warning(
@@ -296,7 +306,12 @@ async def _poll_for_video_completion(
                 return "timeout", {}
             continue
 
-        if loop.time() - start_time > max_wait_seconds:
+        elapsed = loop.time() - start_time
+        if elapsed > max_wait_seconds:
+            logger.warning(
+                f"{cid_prefix()}[Video] Poll timeout after {elapsed:.0f}s "
+                f"(max={max_wait_seconds}s) for {request_id} — still in progress on xAI"
+            )
             return "timeout", {}
 
         # normal or backoff sleep (only on clean poll cycle)
@@ -481,9 +496,20 @@ async def _tool_generate_video(
                     if not xai_video_id:
                         return "Error generating video: the API did not return a request ID."
 
-                    logger.info(f"{cid_prefix()}[Video] Polling for completion of xAI video request {xai_video_id}")
+                    poll_max = _video_poll_max_wait_seconds(
+                        duration=enforced_duration,
+                        resolution=final_resolution,
+                    )
+                    logger.info(
+                        f"{cid_prefix()}[Video] Polling for completion of xAI video request "
+                        f"{xai_video_id} (max_wait={poll_max}s, {final_resolution}, {enforced_duration}s)"
+                    )
                     poll_status, poll_data = await _poll_for_video_completion(
-                        http_client, xai_video_id, api_key, max_wait_seconds=300, poll_interval=5.0
+                        http_client,
+                        xai_video_id,
+                        api_key,
+                        max_wait_seconds=poll_max,
+                        poll_interval=5.0,
                     )
 
                     if poll_status != "succeeded":

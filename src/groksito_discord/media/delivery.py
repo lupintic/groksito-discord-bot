@@ -9,7 +9,7 @@ Combines:
 Used by image_handler, video_handler, audio_handler, and the DIRECT_DELIVERY_PERFORMED
 sentinel pattern in llm/client.py and core/conversation.py.
 
-Pending-request TTL: 90s for images/audio; 360s for video (xAI polling can take up to ~300s).
+Pending-request TTL: 90s for images/audio; video TTL = video_poll_max_wait_seconds + 60s buffer.
 """
 
 from __future__ import annotations
@@ -55,12 +55,13 @@ DIRECT_DELIVERY_PERFORMED = object()
 _pending_image_requests: dict[str, PendingImageRequest] = {}
 _image_request_lock = asyncio.Lock()
 _IMAGE_REQUEST_TTL = 90  # seconds (images / audio)
-_VIDEO_REQUEST_TTL = 360  # seconds — video polling can run up to ~300s
+_VIDEO_REQUEST_TTL_BUFFER = 60  # seconds beyond poll max so deliver_from_request can succeed
 
 
 def _request_ttl_for_operation(operation_type: str) -> int:
     if operation_type == "video":
-        return _VIDEO_REQUEST_TTL
+        poll_max = getattr(settings, "video_poll_max_wait_seconds", 600)
+        return int(poll_max) + _VIDEO_REQUEST_TTL_BUFFER
     return _IMAGE_REQUEST_TTL
 
 
@@ -141,6 +142,53 @@ def build_video_caption(*, from_image: bool, duration: int, prompt: str | None =
     Maximum nativeness ("Grok be Grok"). Just the attachment, no robotic text.
     """
     return ""
+
+
+def _discord_max_upload_bytes() -> int:
+    return int(getattr(settings, "discord_max_upload_bytes", 25 * 1024 * 1024))
+
+
+def _is_discord_payload_too_large(err: Exception) -> bool:
+    if isinstance(err, discord.HTTPException):
+        if getattr(err, "status", None) == 413:
+            return True
+        if getattr(err, "code", None) == 40005:
+            return True
+    text = str(err).lower()
+    return "payload too large" in text or "40005" in text or "413" in text
+
+
+def _build_url_fallback_content(urls: list[str], caption: str) -> str:
+    links = "\n".join(urls[:4])
+    caption = (caption or "").strip()
+    if caption:
+        return f"{caption}\n{links}"
+    return links
+
+
+async def _deliver_url_fallback(
+    orig_msg: Any,
+    *,
+    urls: list[str],
+    caption: str,
+    kind: str,
+) -> bool:
+    if not urls:
+        return False
+    content = _build_url_fallback_content(urls, caption)
+    try:
+        await orig_msg.reply(content, mention_author=False)
+    except Exception as send_err:
+        logger.error(
+            f"{cid_prefix()}[MediaDelivery] URL fallback reply failed ({kind}): {send_err}"
+        )
+        return False
+
+    logger.info(
+        f"{cid_prefix()}[MediaDelivery] Delivered {kind} via URL fallback "
+        f"({len(urls)} link(s)) to msg {getattr(orig_msg, 'id', '?')}"
+    )
+    return True
 
 
 def _guess_filename(url: str, kind: str, index: int = 0) -> str:
@@ -234,14 +282,33 @@ async def deliver_media_to_message(
     if not orig_msg:
         return False
 
+    source_urls = list(urls or [])
     attachments: list[discord.File] = list(files or [])
+    max_bytes = _discord_max_upload_bytes()
+    oversized_for_discord = False
 
-    if not attachments and urls:
-        downloaded = await _download_urls(urls)
+    if not attachments and source_urls:
+        downloaded = await _download_urls(source_urls)
         for data, filename in downloaded:
+            if len(data) > max_bytes:
+                oversized_for_discord = True
+                logger.info(
+                    f"{cid_prefix()}[MediaDelivery] {kind} attachment {len(data)} bytes "
+                    f"exceeds Discord limit ({max_bytes}); will use URL fallback"
+                )
+                continue
             attachments.append(discord.File(BytesIO(data), filename=filename))
 
+    if oversized_for_discord and kind == "video" and source_urls:
+        return await _deliver_url_fallback(
+            orig_msg, urls=source_urls, caption=caption, kind=kind
+        )
+
     if not attachments:
+        if source_urls and kind == "video":
+            return await _deliver_url_fallback(
+                orig_msg, urls=source_urls, caption=caption, kind=kind
+            )
         logger.warning(f"{cid_prefix()}[MediaDelivery] No attachments to deliver ({kind})")
         return False
 
@@ -249,11 +316,21 @@ async def deliver_media_to_message(
         content = caption or None
         await orig_msg.reply(content, files=attachments[:10], mention_author=False)
     except Exception as send_err:
+        if _is_discord_payload_too_large(send_err) and source_urls and kind == "video":
+            logger.warning(
+                f"{cid_prefix()}[MediaDelivery] Discord rejected {kind} attachment "
+                f"({send_err}); retrying with URL fallback"
+            )
+            return await _deliver_url_fallback(
+                orig_msg, urls=source_urls, caption=caption, kind=kind
+            )
         logger.error(f"{cid_prefix()}[MediaDelivery] Discord reply failed ({kind}): {send_err}")
-        # This will cause sentinel not to be returned; model will likely produce a text reply (may be in English on some servers).
         try:
-            gid = getattr(getattr(orig_msg, 'guild', None), 'id', None)
-            logger.info(f"{cid_prefix()}[MediaDelivery] Delivery fallback will let model speak (guild={gid}, kind={kind})")
+            gid = getattr(getattr(orig_msg, "guild", None), "id", None)
+            logger.info(
+                f"{cid_prefix()}[MediaDelivery] Delivery fallback will let model speak "
+                f"(guild={gid}, kind={kind})"
+            )
         except Exception:
             pass
         return False
