@@ -150,10 +150,89 @@ async def test_vision_404_retry_succeeds_without_images(monkeypatch):
         author_name="tester",
         channel_id=99,
         image_urls=[image_url],
+        attachments=[],  # extended for Task 4: attachments threaded (empty here keeps compat)
         is_mentioned=True,
     )
 
     assert result == "Es un meme gracioso."
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_non_404_gif_trouble_retries_with_attachments_metadata(monkeypatch):
+    """Non-404 vision/processing trouble on GIF should retry once with image_urls=[] but attachments kept, succeed using metadata."""
+    from groksito_discord.llm.client import call_grok_for_groksito
+
+    gif_url = "https://cdn.discordapp.com/attachments/1/2/funny.gif"
+    gif_att = {"filename": "funny.gif", "content_type": "image/gif", "size": 234567}
+
+    async def fake_build_responses_input(**kwargs):
+        has_imgs = bool(kwargs.get("image_urls"))
+        atts = kwargs.get("attachments") or []
+        if has_imgs:
+            content = [{"type": "input_image", "image_url": gif_url}]
+        else:
+            # metadata present on retry
+            content = f"describe the gif\n\n[Attachments sent with this message:\n- funny.gif (image/gif, 229.1KB)\n]"
+        return {
+            "initial_input": [{"role": "user", "content": content}],
+            "stable_prefix_len": 50,
+            "need": "normal",
+            "user_id": "1",
+            "user_message_text": "describe the gif",
+        }
+
+    monkeypatch.setattr(
+        "groksito_discord.llm.client.build_responses_input",
+        fake_build_responses_input,
+    )
+    monkeypatch.setattr(
+        "groksito_discord.llm.client._get_grok_bearer",
+        lambda: "fake-test-bearer",
+    )
+    success_response = MagicMock()
+    success_response.output_text = "I see the attached funny.gif (image/gif). Vision is limited to JPG/PNG so I rely on metadata."
+    success_response.output = []
+    success_response.usage = MagicMock(input_tokens=30)
+
+    call_count = 0
+
+    async def flaky_responses_call(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        inp = kwargs.get("input") or (args[0] if args else None)
+        images_present = False
+        try:
+            # Detect "when images present" per spec: look for input_image blocks in first-turn input
+            for item in (inp or []):
+                c = item.get("content") if isinstance(item, dict) else None
+                if isinstance(c, list) and any(
+                    isinstance(ii, dict) and ii.get("type") == "input_image" for ii in c
+                ):
+                    images_present = True
+                    break
+        except Exception:
+            pass
+        if call_count == 1 and images_present:
+            # non-404 processing trouble (e.g. GIF vision rejection)
+            raise RuntimeError("processing error while handling attached GIF")
+        return success_response
+
+    monkeypatch.setattr(
+        "groksito_discord.llm.client._call_responses_with_retry",
+        flaky_responses_call,
+    )
+
+    result = await call_grok_for_groksito(
+        user_message="describe the gif",
+        author_name="tester",
+        channel_id=99,
+        image_urls=[gif_url],
+        attachments=[gif_att],
+        is_mentioned=True,
+    )
+
+    assert result == "I see the attached funny.gif (image/gif). Vision is limited to JPG/PNG so I rely on metadata."
     assert call_count == 2
 
 
