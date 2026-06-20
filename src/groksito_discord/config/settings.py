@@ -75,6 +75,13 @@ class GroksitoSettings(BaseSettings):
         default=60.0,
         description="Default timeout (total) for API calls to xAI (Responses client + httpx for image/video). Higher values for video gen.",
     )
+    video_poll_max_wait_seconds: int = Field(
+        default=600,
+        description=(
+            "Max seconds to poll xAI video generation before giving up. "
+            "xAI SDK default is 10 minutes; 720p/15s jobs often exceed 5 minutes."
+        ),
+    )
 
     # -------------------------------------------------------------------------
     # Experimental: Grok auth via SuperGrok / X Premium+ OAuth (no API key)

@@ -9,7 +9,7 @@ Combines:
 Used by image_handler, video_handler, audio_handler, and the DIRECT_DELIVERY_PERFORMED
 sentinel pattern in llm/client.py and core/conversation.py.
 
-Pending-request TTL: 90s for images/audio; 360s for video (xAI polling can take up to ~300s).
+Pending-request TTL: 90s for images/audio; video TTL = video_poll_max_wait_seconds + 60s buffer.
 """
 
 from __future__ import annotations
@@ -55,12 +55,13 @@ DIRECT_DELIVERY_PERFORMED = object()
 _pending_image_requests: dict[str, PendingImageRequest] = {}
 _image_request_lock = asyncio.Lock()
 _IMAGE_REQUEST_TTL = 90  # seconds (images / audio)
-_VIDEO_REQUEST_TTL = 360  # seconds — video polling can run up to ~300s
+_VIDEO_REQUEST_TTL_BUFFER = 60  # seconds beyond poll max so deliver_from_request can succeed
 
 
 def _request_ttl_for_operation(operation_type: str) -> int:
     if operation_type == "video":
-        return _VIDEO_REQUEST_TTL
+        poll_max = getattr(settings, "video_poll_max_wait_seconds", 600)
+        return int(poll_max) + _VIDEO_REQUEST_TTL_BUFFER
     return _IMAGE_REQUEST_TTL
 
 

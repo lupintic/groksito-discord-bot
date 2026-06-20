@@ -105,7 +105,7 @@ async def test_download_url_retries_on_transient_failure():
 
 def test_video_request_ttl_exceeds_image_ttl():
     assert _request_ttl_for_operation("video") > _request_ttl_for_operation("image")
-    assert _request_ttl_for_operation("video") >= 300
+    assert _request_ttl_for_operation("video") >= 600
 
 
 # Rioplatense markers that leak regional dialect into neutral Grok voice (#110)
