@@ -422,9 +422,8 @@ async def build_responses_input(
 
     # Attachments block (new for Task 3): metadata + optional text_content for small files.
     # Computed here, prepended early (before [R:]/emoji context_note) into user content.
-    # Always when non-empty (even pure-gen if attachments passed; useful for text files in prompt).
-    # Gated implicitly because build_responses_input called only on addressed turns.
-    attachments_block = _build_attachments_block(attachments) if attachments else ""
+    # Gated for pure image/video gen paths (like emoji block) to keep input minimal.
+    attachments_block = _build_attachments_block(attachments) if attachments and not image_gen_intent else ""
 
     try:
         injected_chars = len(dynamic_context_block)
