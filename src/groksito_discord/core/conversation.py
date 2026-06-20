@@ -344,6 +344,86 @@ async def _maybe_fetch_text_content(att: Any, cid_p: str) -> str | None:
         return None
 
 
+async def _extract_gif_frames_as_vision_urls(attachment_url: str, cid_p: str, num_frames: int = 3, max_bytes: int = 15 * 1024 * 1024) -> list[str]:
+    """Extract up to 3 representative frames (start, middle, end) from GIF/WebP as PNG data URIs.
+    Much better than single first frame (which is often black).
+    Uses temp file for reliable ffmpeg processing.
+    Returns list of 'data:image/png;base64,...'
+    """
+    if num_frames < 1:
+        return []
+    import tempfile
+    import os
+    tmp_path = None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(attachment_url, follow_redirects=True)
+            resp.raise_for_status()
+            if len(resp.content) > max_bytes:
+                logger.debug(f"{cid_p}[Vision] attachment too large for frame extraction")
+                return []
+            media_bytes = resp.content
+
+        import subprocess
+        import base64
+
+        # Write to temp file for reliable ffmpeg/ffprobe (pipe can be flaky for some GIFs)
+        with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as tmp:
+            tmp.write(media_bytes)
+            tmp_path = tmp.name
+
+        # Probe duration
+        duration = 2.0
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", tmp_path],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if probe.returncode == 0 and probe.stdout.strip():
+                duration = max(0.1, float(probe.stdout.strip()))
+        except Exception:
+            pass
+
+        positions = [0.0]
+        if num_frames >= 2:
+            positions.append(duration / 2.0)
+        if num_frames >= 3:
+            positions.append(max(0.05, duration - 0.2))
+        positions = sorted(set(positions))[:num_frames]
+
+        frames: list[str] = []
+        for t in positions:
+            cmd = [
+                "ffmpeg", "-ss", str(t), "-i", tmp_path,
+                "-frames:v", "1",
+                "-f", "image2pipe",
+                "-vcodec", "png",
+                "-y", "pipe:1"
+            ]
+            proc = subprocess.run(cmd, capture_output=True, timeout=10)
+            if proc.returncode == 0 and proc.stdout:
+                b64 = base64.b64encode(proc.stdout).decode("ascii")
+                frames.append(f"data:image/png;base64,{b64}")
+
+        if frames:
+            logger.info(f"{cid_p}[Vision] Extracted {len(frames)} frames from GIF for vision (better than single black frame)")
+        else:
+            logger.debug(f"{cid_p}[Vision] No frames extracted from GIF")
+        return frames
+    except Exception as conv_err:
+        logger.debug(f"{cid_p}[Vision] GIF frame extraction skipped: {conv_err}")
+        return []
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
 async def _harvest_vision_images(
     message: Any,
     referenced: Any | None,
@@ -380,6 +460,15 @@ async def _harvest_vision_images(
             if u and u not in image_urls:
                 image_urls.append(u)
                 logger.debug(f"{cid_p}[Vision] Image URL from attachment (current msg, supported): {u[:70]}...")
+        else:
+            # Workaround for GIFs / WebP etc: extract start/middle/end frames as PNG data URIs
+            ct = (getattr(att, "content_type", "") or "").lower()
+            fn = (getattr(att, "filename", "") or "").lower()
+            if "gif" in ct or fn.endswith(".gif") or "webp" in ct or fn.endswith(".webp"):
+                for vurl in await _extract_gif_frames_as_vision_urls(getattr(att, "url", ""), cid_p, num_frames=3):
+                    if vurl and vurl not in image_urls:
+                        image_urls.append(vurl)
+                logger.debug(f"{cid_p}[Vision] Added up to 3 GIF frames as PNG data URIs for vision")
 
     # Direct referenced message: attachments + text extraction (primary path)
     #
@@ -403,6 +492,13 @@ async def _harvest_vision_images(
                 if u and u not in image_urls:
                     image_urls.append(u)
                     logger.debug(f"{cid_p}[Vision] Image URL from attachment (referenced, supported): {u[:70]}...")
+            else:
+                ct = (getattr(att, "content_type", "") or "").lower()
+                fn = (getattr(att, "filename", "") or "").lower()
+                if "gif" in ct or fn.endswith(".gif") or "webp" in ct or fn.endswith(".webp"):
+                    for vurl in await _extract_gif_frames_as_vision_urls(getattr(att, "url", ""), cid_p, num_frames=3):
+                        if vurl and vurl not in image_urls:
+                            image_urls.append(vurl)
 
         # Text-based extraction (bot image links in the referenced text) ΓÇö keep stricter.
         if is_reply_continuation and (explicit_visual_reply_intent or has_x_link_intent):
@@ -504,6 +600,20 @@ async def _harvest_vision_images(
     image_urls = filter_unreliable_vision_urls(image_urls)
     if len(image_urls) < raw_count:
         logger.info(f"{cid_p}[Vision] Filtered {raw_count - len(image_urls)} unreliable image URL(s) (X/Twitter previews or Discord link-embed proxies) to prevent 404 on vision; using text + x_search fallback")
+
+    # Final filter: only supported vision formats (jpg/png) or our data: URIs from GIF frame extraction.
+    # This prevents raw .gif / .webp URLs (from chain, text extract, or old code) from reaching the API and causing 400s.
+    def _is_vision_compatible(u: str) -> bool:
+        if not u:
+            return False
+        if u.startswith("data:image/"):
+            return True
+        try:
+            p = u.lower().split("?", 1)[0].split("#", 1)[0]
+            return p.endswith((".jpg", ".jpeg", ".png"))
+        except Exception:
+            return False
+    image_urls = [u for u in image_urls if _is_vision_compatible(u)]
 
     if image_urls:
         logger.info(f"{cid_p}[Vision] Total image URLs harvested for this turn: {len(image_urls)} (reply_continuation={is_reply_continuation}, mentioned={is_mentioned})")

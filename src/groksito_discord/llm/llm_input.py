@@ -347,6 +347,7 @@ def _build_attachments_block(attachments: list[dict] | None) -> str:
             fence = f"  ```{lang}\n{display}\n  ```"
             lines.append(fence)
     lines.append("]")
+
     return "\n".join(lines)
 
 
