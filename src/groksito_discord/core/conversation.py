@@ -510,7 +510,12 @@ async def _harvest_vision_images(
 
     if attachments:
         n_text = sum(1 for a in attachments if "text_content" in a)
-        logger.debug(f"{cid_p}[Vision] Collected {len(attachments)} attachment meta(s) (current+ref); {n_text} had inline text")
+        n_vision = sum(
+            1 for a in attachments
+            if (str(a.get("content_type", "")).lower().startswith(("image/jpeg", "image/png")))
+            or str(a.get("filename", "")).lower().endswith((".jpg", ".jpeg", ".png"))
+        )
+        logger.info(f"{cid_p}{len(attachments)} attachments harvested ({n_vision} vision, {n_text} text inlined)")
 
     return image_urls[:5], attachments  # images for back-compat paths; attachments always for context
 
@@ -553,7 +558,7 @@ async def _invoke_groksito(
         is_mentioned=is_mentioned,
         user_text=user_message,
     )
-    # attachments: list of meta dicts for current msg (always) + ref when reply_cont; passed down in later tasks
+    # attachments: list of meta dicts for current msg (always) + ref when reply_cont; now passed to call_grok_with_tools for llm_input block + vision guard.
 
     # Deeper text chain walking for referent resolution.
     # When there's a reply chain (or on mention with referent language), fetch ancestors
@@ -581,12 +586,14 @@ async def _invoke_groksito(
         # Real call to the LLM layer (now connected to xAI Responses API + tools).
         # We pass has_image_creation_intent (strict; now includes video-from-ref for offering parity)
         # for media tool offering; images for vision are handled separately.
+        # attachments from harvest wired here (Task 5) so metadata for all types reaches build_responses_input / model.
         response_text = await call_grok_with_tools(
             user_message=user_message,
             author_name=author_display,
             channel_id=message.channel.id,
             original_message=message,
             image_urls=image_urls,
+            attachments=attachments,
             referenced_context=referenced_context,
             reply_chain_contexts=chain_contexts,  # deeper ancestors for text referents (YouTube, "what the user said", etc.)
             has_visual_intent=has_image_creation_intent,

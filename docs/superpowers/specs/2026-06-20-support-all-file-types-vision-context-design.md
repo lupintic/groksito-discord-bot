@@ -221,3 +221,14 @@ No other files.
 - Matches AGENTS.md (respect architecture, only touch listed places, write tests).
 
 Spec written and will be committed. User: please review the file at the path below and confirm (or request changes) before we move to writing the implementation plan.
+
+## Status Update (Task 5 completion)
+- All steps 0-5 complete.
+- Harvest returns + wires attachments to call_grok / build_responses_input.
+- Logging: "X attachments harvested (Y vision, Z text inlined)" added at info.
+- Full support for GIFs (meta + retry), text inlines, PDFs etc via metadata.
+- No breakage to pure-gen or non-addressed.
+- pytest + check run (pre-existing artifact test noise unrelated).
+- Roundtrip sim test added.
+- Metadata now reaches model for real addressed messages with any attachments.
+- Canned vision error now guarded when attachments present (general error path).
