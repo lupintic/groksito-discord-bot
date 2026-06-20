@@ -81,6 +81,20 @@ GET_RECENT_CONTEXT_TOOL_DESCRIPTION = (
     "continues prior discussion in the thread."
 )
 
+GET_USER_AVATAR_TOOL_DESCRIPTION = (
+    "Fetch a Discord user's profile picture CDN URL from this server. "
+    "Use when asked to use someone's @mention avatar, profile photo, or pfp for image edit, "
+    "image-to-video, or stylistic generation (e.g. 'pon su foto de perfil en el video'). "
+    "Resolves @mentions in the message, or optional user_id/username; falls back to the message author. "
+    "The URL is registered as a visual reference for edit_image / generate_video in the same turn."
+)
+
+GET_TOP_SERVER_EMOJI_TOOL_DESCRIPTION = (
+    "Fetch this server's most-used custom emoji image URL (ranked by real chat usage). "
+    "Use when the user wants the popular server emote as a visual reference for generation or editing. "
+    "Optional rank (1 = most used). URL is registered as a visual reference for media tools."
+)
+
 NATIVE_TOOL_JUDGMENT = (
     "You have native tools (web_search, x_search, vision, image/video generation, etc.). "
     "Use your judgment"
@@ -101,7 +115,8 @@ X_SEARCH_PROMPT_HINT = (
 )
 
 VISION_MEDIA_HINT = (
-    "use vision for analysis; for any create/generate/animate video or image request call the matching generate_* tool instead of describing"
+    "use vision for analysis; for any create/generate/animate video or image request call the matching generate_* tool instead of describing; "
+    "for Discord profile pictures or server emojis as references call get_user_avatar or get_top_server_emoji first, then edit_image or generate_video"
 )
 
 GROK_VOICE_GUIDANCE = (

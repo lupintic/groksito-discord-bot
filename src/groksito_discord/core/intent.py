@@ -77,6 +77,12 @@ _VIDEO_CREATION_I2V_EXTRA = (
     "anima esta", "anima la", "anima esto", "anima esa",
     "convierte esta en video", "convierte la en video", "convierte en video",
     "animate this", "turn this into a video",
+    # Add-to-video / composite-into-video (common reply-to-bot I2V phrasing)
+    "agregalo a ese video", "agregalo al video", "agrégalo a ese video",
+    "agregarlo a ese video", "agregarlo al video", "añadelo a ese video",
+    "añadirlo a ese video", "ponlo en ese video", "ponlo en el video",
+    "integrarlo en el video", "integralo en el video", "integralo al video",
+    "add to that video", "add to this video", "put it in the video",
 )
 
 _VIDEO_PURE_NEGATIVES = (

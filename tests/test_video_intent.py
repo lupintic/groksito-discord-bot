@@ -45,6 +45,12 @@ class TestHasExplicitVideoIntent:
                 "polite reply-to-bot I2V phrasing",
             ),
             ("generar un video de la foto", True, "infinitive 'generar un video'"),
+            (
+                "toma la foto de perfil y agregalo a ese video como personaje anime",
+                True,
+                "composite-into-existing-video I2V phrasing",
+            ),
+            ("ponlo en ese video con estilo anime", True, "put-in-video modification phrasing"),
         ],
     )
     def test_positive_cases(self, text, expected, reason):
