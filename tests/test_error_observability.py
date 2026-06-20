@@ -264,3 +264,65 @@ def test_is_text_attachment_detects():
     assert is_text_attachment(py_att) is True
     pdf_att = type('A', (), {'content_type': 'application/pdf', 'filename': 'r.pdf'})()
     assert is_text_attachment(pdf_att) is False
+
+
+# =============================================================================
+# TDD for Task 2: harvest now returns (images, attachments) and collects all + filters vision + inlines text
+# =============================================================================
+
+from types import SimpleNamespace
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_harvest_returns_attachments_and_filters_to_supported_vision_only():
+    """Failing test (TDD) for enhanced harvest: must collect ALL attachments meta for current,
+    only supported images (jpg/png) go to image_urls, text attachments considered for inline (fetch may skip).
+    """
+    from groksito_discord.core.conversation import _harvest_vision_images
+
+    att_jpg = SimpleNamespace(
+        content_type="image/jpeg", filename="photo.jpg", url="https://cdn.example.com/photo.jpg", size=12345
+    )
+    att_gif = SimpleNamespace(
+        content_type="image/gif", filename="anim.gif", url="https://cdn.example.com/anim.gif", size=9999
+    )
+    att_py = SimpleNamespace(
+        content_type="text/x-python", filename="script.py", url="https://cdn.example.com/script.py", size=200
+    )
+    att_pdf = SimpleNamespace(
+        content_type="application/pdf", filename="doc.pdf", url="https://cdn.example.com/doc.pdf", size=5000
+    )
+
+    msg = SimpleNamespace(attachments=[att_jpg, att_gif, att_py, att_pdf], content="")
+
+    # Call with no referenced, no special intent -> should still collect current attachments
+    result = await _harvest_vision_images(
+        message=msg,
+        referenced=None,
+        explicit_visual_reply_intent=False,
+        is_reply_continuation=False,
+        has_x_link_intent=False,
+        is_mentioned=False,
+        user_text="",
+    )
+
+    # This will fail until harvest refactored to return tuple (images, attachments)
+    image_urls, attachments = result
+
+    # All 4 attachments must be present via meta (new behavior)
+    assert len(attachments) == 4
+    filenames = [a.get("filename") for a in attachments]
+    assert "photo.jpg" in filenames
+    assert "anim.gif" in filenames
+    assert "script.py" in filenames
+    assert "doc.pdf" in filenames
+
+    # Only the supported vision image (jpg) should be in image_urls (gif filtered by is_supported_vision_image)
+    assert len(image_urls) == 1
+    assert "photo.jpg" in str(image_urls[0]) or image_urls[0].endswith("photo.jpg")  # url contains
+
+    # For text att, if inline happened meta would have text_content; fetch uses fake url so may be absent (graceful)
+    # Main point of test: attachments list is returned and populated.
+    assert any(a.get("filename") == "script.py" for a in attachments)
