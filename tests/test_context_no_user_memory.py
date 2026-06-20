@@ -118,3 +118,91 @@ class TestBuildResponsesInputNoUserMemory:
         serialized = json.dumps(result["initial_input"])
         assert secret_marker not in serialized
         assert "SECRET_USER_PROFILE" not in serialized
+
+
+# =============================================================================
+# TDD for Task 3: attachments block injected into build_responses_input
+# Tests written first (will fail until _build_attachments_block + injection + sig update).
+# =============================================================================
+
+class TestBuildResponsesInputAttachments:
+    @pytest.mark.asyncio
+    async def test_attachments_block_injected_in_built_input(self):
+        """TDD: attachments (mix image+text+other, with text_content) produce the block in final user content."""
+        atts = [
+            {"filename": "funny.gif", "content_type": "image/gif", "size": 2400000},
+            {"filename": "main.py", "content_type": "text/x-python", "size": 4200, "text_content": "def foo():\n    pass\n"},
+            {"filename": "report.pdf", "content_type": "application/pdf", "size": 1470000},
+        ]
+        fake_message = SimpleNamespace(author=SimpleNamespace(id=123))
+        result = await build_responses_input(
+            user_message="check these files",
+            channel_id=1,
+            original_message=fake_message,
+            image_urls=None,
+            referenced_context=None,
+            reply_chain_contexts=None,
+            is_reply_continuation=False,
+            has_x_link_intent=False,
+            is_reply_to_bot=True,
+            is_mentioned=False,
+            attachments=atts,
+        )
+
+        serialized = json.dumps(result["initial_input"])
+        assert "[Attachments sent with this message:" in serialized
+        assert "funny.gif (image/gif, 2.3MB)" in serialized
+        assert "main.py (text/x-python, 4.1KB)" in serialized
+        assert "```python" in serialized
+        assert "def foo():" in serialized
+        assert "report.pdf (application/pdf, 1.4MB)" in serialized
+        assert serialized.count("]") >= 1  # block closer
+        assert "check these files" in serialized
+
+    @pytest.mark.asyncio
+    async def test_attachments_with_vision_images_still_produces_correct_input_image_count(self):
+        """TDD: attachments block present, but only supported vision images become input_image (gif meta only)."""
+        atts = [
+            {"filename": "photo.jpg", "content_type": "image/jpeg", "size": 12345},
+            {"filename": "anim.gif", "content_type": "image/gif", "size": 9999},
+            {"filename": "notes.txt", "content_type": "text/plain", "size": 100, "text_content": "hello world from txt"},
+        ]
+        # only supported vision url passed separately (as harvest does)
+        image_urls = ["https://cdn.example.com/photo.jpg"]
+        fake_message = SimpleNamespace(author=SimpleNamespace(id=42))
+        result = await build_responses_input(
+            user_message="what is in the pic and txt",
+            channel_id=1,
+            original_message=fake_message,
+            image_urls=image_urls,
+            referenced_context=None,
+            reply_chain_contexts=None,
+            is_reply_continuation=False,
+            has_x_link_intent=False,
+            is_reply_to_bot=True,
+            is_mentioned=False,
+            attachments=atts,
+        )
+
+        initial_input = result["initial_input"]
+        user_turn = initial_input[-1]
+        content = user_turn.get("content")
+        assert isinstance(content, list), "multimodal expected with images"
+
+        img_count = sum(1 for c in content if isinstance(c, dict) and c.get("type") == "input_image")
+        assert img_count == 1, "exactly the supported vision images, not gifs"
+
+        # the first (or only) input_text contains the prepended attachments block + note
+        text_blobs = " ".join(
+            (c.get("text") or "") for c in content if isinstance(c, dict) and c.get("type") == "input_text"
+        )
+        assert "[Attachments sent with this message:" in text_blobs
+        assert "photo.jpg" in text_blobs
+        assert "anim.gif" in text_blobs  # listed in meta
+        assert "notes.txt" in text_blobs
+        assert "hello world from txt" in text_blobs
+        # no vision block for gif
+        assert not any(
+            isinstance(c, dict) and c.get("type") == "input_image" and "gif" in str(c).lower()
+            for c in content
+        )
