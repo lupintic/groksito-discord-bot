@@ -22,6 +22,7 @@ src/groksito_discord/
 │       └── twitch.py       # Twitch helpers (where used)
 ├── core/
 │   ├── conversation.py     # Activation, vision harvest, ref context
+│   ├── discord_assets.py   # On-demand avatar + top-server-emoji CDN resolvers
 │   ├── intent.py           # Visual/audio keyword signals
 │   ├── grok_oauth.py       # OAuth PKCE + bearer resolution
 │   ├── health.py           # Health snapshots for dashboard
@@ -93,7 +94,7 @@ Discord (Gateway + REST)
 - `llm_utils.py`: Native search schema builder (descriptions from `prompt_builder`), per-user `prompt_cache_key` helper, structured token + cache metrics logging (`cached_tokens`, hit rate), API retry helper.
 - Prompt construction prioritizes cache efficiency and Maximum Nativeness: no automatic long-term memory or channel history pre-injection (recent context only via the `get_recent_context` tool when the model asks). All addressed turns receive minimal gated referent data.
 - Tool selection and prompt content are intentionally minimal; Grok's native reasoning + `previous_response_id` drive most decisions and continuity.
-- Tiered custom tools: ultra-minimal on continuations; heavy media only on explicit visual/audio intent; light decision tools (including `get_recent_context` + `respond_directly`) on addressed turns.
+- Tiered custom tools: ultra-minimal on continuations; heavy media only on explicit visual/audio intent; light decision tools (including `get_recent_context`, `get_user_avatar`, `get_top_server_emoji`, + `respond_directly`) on addressed turns. Avatar/emoji tools resolve public Discord CDN URLs and append them to the turn's reference image list for `edit_image` / `generate_video` I2V. After asset resolution with video intent, continuations re-offer media tools (`pending_media_after_asset` = media-only, no `reply_to_user`) so the model must call `generate_video` instead of role-playing delivery.
 - Native `web_search` / `x_search` offered on normal addressed paths (with stable descriptions); skipped on casual/minimal/image_gen.
 - Media tools cooperate with `media/delivery.py` for direct delivery (sentinel pattern).
 

@@ -27,6 +27,7 @@ The bot is designed around "maximum nativeness": minimal custom memory or contex
 
 - **Discord Interaction Tools**
   - The model controls response style via tools: `reply_to_user`, `react_to_message`, `create_thread`.
+  - On-demand Discord asset tools: `get_user_avatar` (profile picture CDN URL for @mentioned users) and `get_top_server_emoji` (most-used server emote) — usable as references for image edit / image-to-video.
   - Full support for referenced messages, reply chains, and image harvesting.
 
 - **Steam Integration**

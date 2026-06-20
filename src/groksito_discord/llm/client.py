@@ -28,6 +28,7 @@ from ..config import settings
 from ..media.delivery import DIRECT_DELIVERY_PERFORMED
 from .prompt_builder import DIRECT_DELIVERY_DETECTOR_PHRASES
 from .tools import (
+    ASSET_RESOLVER_TOOLS,
     get_tools_for_request,
     log_tool_selection,
     execute_hybrid_tool,
@@ -92,6 +93,13 @@ MEDIA_ACTION_TOOLS = frozenset({
     "generate_video",
     "generate_audio",
     "reply_to_user",
+})
+
+_MEDIA_DELIVERY_TOOLS = frozenset({
+    "generate_image",
+    "edit_image",
+    "generate_video",
+    "generate_audio",
 })
 
 _CONTINUATION_NO_SEARCH_REOFFER_TOOLS = frozenset({
@@ -348,6 +356,8 @@ async def _execute_tool_loop(
     direct_delivery_performed = False
     model_chose_search = False
     model_chose_direct = False
+    asset_references_resolved = False
+    media_delivered = False
 
     for round_num in range(1, max_tool_rounds + 1):
         client_tool_outputs: list[dict] = []
@@ -388,6 +398,8 @@ async def _execute_tool_loop(
                         "web_search",
                         "x_search",
                         "get_recent_context",
+                        "get_user_avatar",
+                        "get_top_server_emoji",
                         "respond_directly",
                     }
                     if name in decision_tool_names:
@@ -449,9 +461,14 @@ async def _execute_tool_loop(
                 f"result length={len(result_str)}"
             )
 
+            if name in ASSET_RESOLVER_TOOLS and "RESOLVED" in result_str.upper():
+                asset_references_resolved = True
+
             if name in MEDIA_ACTION_TOOLS:
                 if _is_direct_delivery_success(result_str, name or "", cid_p):
                     direct_delivery_performed = True
+                    if name in _MEDIA_DELIVERY_TOOLS:
+                        media_delivered = True
 
             client_tool_outputs.append({
                 "type": "function_call_output",
@@ -467,12 +484,25 @@ async def _execute_tool_loop(
             break
 
         if direct_delivery_performed:
-            logger.info(
-                f"{cid_p}[LLM] Round {round_num}: direct delivery performed "
-                "— short-circuiting (skip sending tool results back + no further rounds). "
-                "Natural + cheap."
+            premature_reply = (
+                asset_references_resolved
+                and not media_delivered
+                and bool(round_executed_tools & {"reply_to_user"})
+                and not (round_executed_tools & _MEDIA_DELIVERY_TOOLS)
             )
-            break
+            if premature_reply:
+                logger.info(
+                    f"{cid_p}[LLM] Round {round_num}: suppressing premature reply_to_user "
+                    "short-circuit — asset reference resolved but media tool not called yet"
+                )
+                direct_delivery_performed = False
+            else:
+                logger.info(
+                    f"{cid_p}[LLM] Round {round_num}: direct delivery performed "
+                    "— short-circuiting (skip sending tool results back + no further rounds). "
+                    "Natural + cheap."
+                )
+                break
 
         logger.info(
             f"{cid_p}[LLM] Round {round_num}: sending back {len(client_tool_outputs)} "
@@ -483,6 +513,13 @@ async def _execute_tool_loop(
             prev_id = getattr(response, "id", None)
             cache_key = _get_prompt_cache_key(original_message)
 
+            has_resolved_asset_references = asset_references_resolved and bool(image_urls)
+            pending_media_after_asset = (
+                has_resolved_asset_references
+                and (explicit_video_intent or effective_visual_intent)
+                and not media_delivered
+            )
+
             continuation_tools = get_tools_for_request(
                 query_need=need,
                 has_visual_intent=effective_visual_intent,
@@ -491,6 +528,8 @@ async def _execute_tool_loop(
                 is_tool_continuation=True,
                 pure_image_gen=pure_image_gen_intent,
                 pure_video_gen=pure_video_gen_intent,
+                has_resolved_asset_references=has_resolved_asset_references,
+                pending_media_after_asset=pending_media_after_asset,
             )
 
             continuation_native_search_tools = (

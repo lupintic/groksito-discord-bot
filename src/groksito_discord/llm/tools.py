@@ -38,7 +38,12 @@ from .prompt_builder import (
 
 from .. import context
 from ..media.delivery import register_image_request, consume_image_request
-from .prompt_builder import GET_RECENT_CONTEXT_TOOL_DESCRIPTION
+from .prompt_builder import (
+    GET_RECENT_CONTEXT_TOOL_DESCRIPTION,
+    GET_TOP_SERVER_EMOJI_TOOL_DESCRIPTION,
+    GET_USER_AVATAR_TOOL_DESCRIPTION,
+)
+from ..core import discord_assets
 from .media_tools import (
     _generate_video_schema,
     _generate_video_schema_tiny,
@@ -53,6 +58,9 @@ from .media_tools import (
 
 logger = logging.getLogger("groksito.tools")
 tools_logger = logging.getLogger("groksito.tools")  # dedicated for structured tool logs
+
+# Discord asset resolvers that populate image_urls for follow-up media tools.
+ASSET_RESOLVER_TOOLS = frozenset({"get_user_avatar", "get_top_server_emoji"})
 
 
 # =============================================================================
@@ -251,6 +259,12 @@ async def execute_hybrid_tool(
         if name == "get_recent_context":
             return await handle_get_recent_context(args, original_message)
 
+        if name == "get_user_avatar":
+            return await handle_get_user_avatar(args, original_message, image_urls)
+
+        if name == "get_top_server_emoji":
+            return await handle_get_top_server_emoji(args, original_message, image_urls)
+
         if name == "respond_directly":
             return await handle_respond_directly(args, original_message)
 
@@ -358,6 +372,45 @@ def _get_recent_context_schema() -> dict:
     }
 
 
+def _get_user_avatar_schema() -> dict:
+    return {
+        "type": "function",
+        "name": "get_user_avatar",
+        "description": GET_USER_AVATAR_TOOL_DESCRIPTION,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "string",
+                    "description": "Optional Discord user ID. If omitted, uses @mentions or message author.",
+                },
+                "username": {
+                    "type": "string",
+                    "description": "Optional username/display name (without @) when no mention is present.",
+                },
+            },
+        },
+    }
+
+
+def _get_top_server_emoji_schema() -> dict:
+    return {
+        "type": "function",
+        "name": "get_top_server_emoji",
+        "description": GET_TOP_SERVER_EMOJI_TOOL_DESCRIPTION,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "rank": {
+                    "type": "integer",
+                    "description": "Which emoji by usage rank (1 = most used in this server). Default 1.",
+                    "default": 1,
+                }
+            },
+        },
+    }
+
+
 def _respond_directly_schema() -> dict:
     return {
         "type": "function",
@@ -369,6 +422,62 @@ def _respond_directly_schema() -> dict:
         ),
         "parameters": {"type": "object", "properties": {}},
     }
+
+
+async def handle_get_user_avatar(
+    args: dict[str, Any],
+    original_message: Any = None,
+    image_urls: list[str] | None = None,
+) -> str:
+    try:
+        logger.info(f"{cid_prefix()}[DECISION] model chose get_user_avatar")
+        result = await discord_assets.resolve_user_avatar(
+            original_message,
+            user_id=args.get("user_id"),
+            username=args.get("username"),
+            image_urls=image_urls,
+        )
+        if not result.get("ok"):
+            return f"Could not fetch user avatar: {result.get('error', 'unknown error')}"
+        return (
+            f"USER AVATAR RESOLVED:\n"
+            f"- display_name: {result['display_name']}\n"
+            f"- user_id: {result['user_id']}\n"
+            f"- avatar_url: {result['avatar_url']}\n\n"
+            "This URL is now available as a visual reference for edit_image or generate_video "
+            "in this turn. You MUST call generate_video or edit_image next — do NOT use "
+            "reply_to_user to say you are generating; the media tool performs delivery."
+        )
+    except Exception as e:
+        return f"Could not fetch user avatar: {str(e)[:150]}"
+
+
+async def handle_get_top_server_emoji(
+    args: dict[str, Any],
+    original_message: Any = None,
+    image_urls: list[str] | None = None,
+) -> str:
+    try:
+        logger.info(f"{cid_prefix()}[DECISION] model chose get_top_server_emoji")
+        rank = int(args.get("rank") or 1)
+        result = await discord_assets.resolve_top_server_emoji(
+            original_message,
+            rank=rank,
+            image_urls=image_urls,
+        )
+        if not result.get("ok"):
+            return f"Could not fetch server emoji: {result.get('error', 'unknown error')}"
+        return (
+            f"SERVER EMOJI RESOLVED:\n"
+            f"- name: :{result['name']}:\n"
+            f"- rank: {result['rank']} (by real usage in this server)\n"
+            f"- usage_count: {result['usage_count']}\n"
+            f"- image_url: {result['url']}\n\n"
+            "This URL is now available as a visual reference for edit_image or generate_video. "
+            "You MUST call the matching media tool next — do NOT reply_to_user with a generating message."
+        )
+    except Exception as e:
+        return f"Could not fetch server emoji: {str(e)[:150]}"
 
 
 async def handle_get_recent_context(args: dict[str, Any], original_message: Any = None) -> str:
@@ -430,6 +539,8 @@ def get_continuation_tools(
     has_visual_intent: bool = False,
     has_explicit_video_intent: bool = False,
     has_explicit_audio_intent: bool = False,
+    has_resolved_asset_references: bool = False,
+    pending_media_after_asset: bool = False,
 ) -> list[dict]:
     """
     Highly optimized custom tool set for continuation rounds
@@ -446,14 +557,32 @@ def get_continuation_tools(
       media UX to risk removing without extensive production testing.
     - History tools dropped on continuation (use get_recent_context on addressed light turns).
 
-    Heavy media tools are re-offered only when we were already in a visual/audio flow.
+    Heavy media tools are re-offered when we were already in a visual/audio flow,
+    when asset resolvers populated reference URLs (avatar/emoji I2V), or when
+    pending_media_after_asset forces a media-only continuation (no reply_to_user)
+    so the model cannot role-play "generating..." without calling generate_video.
     """
+    carry_visual = has_visual_intent or has_resolved_asset_references
+    carry_video = has_explicit_video_intent or (
+        has_resolved_asset_references and ENABLE_VIDEO_GENERATION
+    )
+
+    if pending_media_after_asset:
+        tools: list[dict] = []
+        _append_visual_media_tools(
+            tools,
+            has_visual_intent=True,
+            has_explicit_video_intent=carry_video,
+            has_explicit_audio_intent=has_explicit_audio_intent,
+        )
+        return tools
+
     tools: list[dict] = [_get_reply_to_user_schema_light()]
 
     _append_visual_media_tools(
         tools,
-        has_visual_intent=has_visual_intent,
-        has_explicit_video_intent=has_explicit_video_intent,
+        has_visual_intent=carry_visual,
+        has_explicit_video_intent=carry_video,
         has_explicit_audio_intent=has_explicit_audio_intent,
     )
 
@@ -534,6 +663,8 @@ def get_tools_for_request(
     pure_image_gen: bool = False,
     pure_video_gen: bool = False,
     offer_light_decision_tools: bool = False,
+    has_resolved_asset_references: bool = False,
+    pending_media_after_asset: bool = False,
 ) -> list[dict]:
     """
     Main entry point for tool selection. Now supports lazy/dynamic offering + ultra-light for image gen.
@@ -561,6 +692,8 @@ def get_tools_for_request(
             has_visual_intent=has_visual_intent,
             has_explicit_video_intent=has_explicit_video_intent,
             has_explicit_audio_intent=has_explicit_audio_intent,
+            has_resolved_asset_references=has_resolved_asset_references,
+            pending_media_after_asset=pending_media_after_asset,
         )
 
     # === ULTRA-AGGRESSIVE "image_gen" MODE (Opción 1) ===
@@ -619,6 +752,8 @@ def get_tools_for_request(
             tools.append(_get_react_to_message_schema_light())
             tools.append(_get_create_thread_schema_light())
             tools.append(_get_recent_context_schema())
+            tools.append(_get_user_avatar_schema())
+            tools.append(_get_top_server_emoji_schema())
             tools.append(_respond_directly_schema())
         except Exception:
             pass

@@ -145,6 +145,30 @@ class TestContinuationToolMinimization:
         assert "generate_video" in names
         assert "generate_image" not in names
 
+    def test_continuation_reoffers_media_after_asset_resolver(self, patch_video_enabled):
+        """Avatar/emoji tools populate image_urls — continuation must re-offer generate_video."""
+        patch_video_enabled(True)
+        tools = get_continuation_tools(
+            has_visual_intent=False,
+            has_explicit_video_intent=False,
+            has_resolved_asset_references=True,
+        )
+        names = _tool_names(tools)
+        assert "generate_video" in names
+        assert "edit_image" in names
+        assert "reply_to_user" in names
+
+    def test_pending_media_after_asset_is_media_only_continuation(self, patch_video_enabled):
+        """Force generate_video call — no reply_to_user to role-play 'generating...'."""
+        patch_video_enabled(True)
+        tools = get_continuation_tools(
+            pending_media_after_asset=True,
+            has_explicit_video_intent=True,
+        )
+        names = _tool_names(tools)
+        assert "generate_video" in names
+        assert "reply_to_user" not in names
+
     def test_visual_media_consolidated_on_continuation(self, patch_video_enabled):
         """Visual media on continuations uses the same offering path as first-turn visual."""
         patch_video_enabled(True)
@@ -234,7 +258,9 @@ class TestLightDecisionOffer:
         assert "use_skill" not in names
         # 5 delivery/decision + 2 image tools + video (native parity with Grok web)
         assert "generate_video" in names
-        assert len(names) <= 8
+        assert "get_user_avatar" in names
+        assert "get_top_server_emoji" in names
+        assert len(names) <= 10
 
     def test_light_decision_offers_video_without_keyword_gate(self, patch_video_enabled):
         """Addressed turns offer generate_video natively (like generate_image), no keyword gate."""
