@@ -44,6 +44,18 @@ class TestBreadthGroundingDetector:
     def test_skips_non_breadth_queries(self, query):
         assert needs_breadth_grounding(query) is False
 
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "busca un video de Bofuri en YouTube",
+            "del clip que me pasaste completito en 4k",
+            "pasame el link del video de HYTL",
+            "find a video of that anime scene on youtube",
+        ],
+    )
+    def test_detects_video_clip_lookup_queries(self, query):
+        assert needs_breadth_grounding(query) is True
+
 
 class TestSystemPromptCompleteness:
     def test_prompt_includes_completeness_self_check(self):
@@ -154,6 +166,13 @@ class TestGrokVoiceGuidance:
     def test_system_prompt_stays_cache_friendly_length(self):
         """New voice block must not bloat the stable system prefix."""
         assert len(SYSTEM_PROMPT) <= 3200
+
+    def test_system_prompt_includes_video_link_search_guidance(self):
+        """Users asking for clips should get YouTube search, not piracy refusals."""
+        lowered = SYSTEM_PROMPT.lower()
+        assert "youtube" in lowered
+        assert "piracy" in lowered or "pirater" in lowered
+        assert "generate_video" in lowered
 
     def test_get_recent_context_tool_description_from_prompt_builder(self):
         from groksito_discord.llm import prompt_builder

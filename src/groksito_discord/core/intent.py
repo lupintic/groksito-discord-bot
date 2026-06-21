@@ -252,6 +252,12 @@ def needs_breadth_grounding(text: str | None) -> bool:
         "en la tv", "en la tele", "a la tv", "to tv", "on tv", "to the tv", "on the tv",
         "puedo usar", "can i use", "what can i use", "que puedo usar",
         "para ver en", "watch on", "stream to", "streaming to",
+        # Video/clip discovery (query-shape; model still uses judgment + prompt guidance)
+        "busca video", "buscar video", "busca un video", "buscar un video",
+        "busca clip", "buscar clip", "enlace de youtube", "link de youtube",
+        "link del video", "enlace del video", "youtube de", "clip de",
+        "del clip", "pasame el video", "pasame el clip", "pásame el video",
+        "find a video", "find the video", "youtube link", "video link",
     )
     if any(p in t for p in patterns):
         return True
