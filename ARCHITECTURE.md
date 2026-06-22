@@ -78,7 +78,7 @@ Discord (Gateway + REST)
 ### Discord (`discord/client.py`)
 - Owns the persistent Gateway connection.
 - Guild whitelist and per-user rate limiting (6 req / 60s) before LLM work.
-- Slash commands: `/mislimites`, `/stmchr`, `/steamchart`, `/topgames`, `/audio` + TTS context menu.
+- Slash commands: `/mislimites`, `/stmchr`, `/steamchart`, `/topgames`, `/topkorea`, `/audio` + TTS context menu.
 - Heartbeats (~35s) for dashboard liveness.
 
 ### Conversation (`core/conversation.py`, `context/`)
@@ -100,6 +100,9 @@ Discord (Gateway + REST)
 
 ### Steam (`discord/integrations/steam.py`)
 - Player counts, fuzzy name resolution, thumbnail URLs. Used by slash commands in `discord/client.py`.
+
+### Korea rankings (`discord/integrations/thelog.py`)
+- Top 10 from TheLog "게임순위 (전체)" via their internal JSON (`getCommonState.do?gameDataType=S`). Powers `/topkorea`. Added June 2026. See design spec.
 
 ### Auth (`core/grok_oauth.py`, `config/settings.py`)
 - Modes: `api_key`, `oauth`, `auto`. Tokens in `./oauth/xai_oauth_tokens.json`.
@@ -143,5 +146,7 @@ Discord (Gateway + REST)
 - Web config editor whitelists safe keys only.
 
 ---
+
+**Recent addition note (2026-06-22):** `/topkorea` added using `discord/integrations/thelog.py` + JSON endpoint from TheLog. See `docs/superpowers/specs/2026-06-22-topkorea-korea-game-ranking-design.md` and the plan. Updated README + this file + inline code comments. — Grok
 
 Update this file when structure or behavior changes materially.
