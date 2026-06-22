@@ -101,8 +101,9 @@ Discord (Gateway + REST)
 ### Steam (`discord/integrations/steam.py`)
 - Player counts, fuzzy name resolution, thumbnail URLs. Used by slash commands in `discord/client.py`.
 
-### Korea rankings (`discord/integrations/thelog.py`)
-- Top 10 from TheLog "게임순위 (전체)" via their internal JSON (`getCommonState.do?gameDataType=S`). Powers `/topkorea`. Added June 2026. See design spec.
+### Korea rankings
+- `discord/integrations/thelog.py` — Top 10 from TheLog "게임순위 (전체)" via JSON. Powers `/topkorea`.
+- `discord/integrations/gamemeca.py` — Weekly top 50 from Gamemeca main ranking table (HTML parse). Powers `/korea50`. Added after investigation (no clean JSON feed available on site).
 
 ### Auth (`core/grok_oauth.py`, `config/settings.py`)
 - Modes: `api_key`, `oauth`, `auto`. Tokens in `./oauth/xai_oauth_tokens.json`.

@@ -54,9 +54,31 @@ from ..core.safety import safe_reply as _safe_reply
 
 # Steam + Twitch integrations (extracted for client hygiene).
 # Data fetching and game resolution live in discord/integrations/.
-from .integrations import steam, thelog, twitch
+from .integrations import gamemeca, steam, thelog, twitch
 
 from ..utils.text import extract_urls_from_text
+
+
+async def _periodic_gamemeca_ranking_update(gamemeca_module):
+    """Background job: refresh Gamemeca ranking JSON ~daily.
+    The page is updated weekly (results reflected next week per site notice).
+    Daily check is safe, cheap, and prevents hitting the site on every user /korea50.
+    Command itself reads from the persisted JSON in data/gamemeca_ranking.json .
+    """
+    # Run once soon after bot start
+    try:
+        await gamemeca_module.refresh_ranking()
+    except Exception as e:
+        logger.debug(f"[Gamemeca] initial refresh failed (non-fatal): {e}")
+
+    while True:
+        await asyncio.sleep(24 * 3600)  # check daily
+        try:
+            await gamemeca_module.refresh_ranking()
+            logger.info("[Gamemeca] ranking JSON refreshed via background job")
+        except Exception as e:
+            logger.warning(f"[Gamemeca] background refresh failed: {e}")
+
 
 # Dedicated /audio slash (reuses 100% of audio_handler.py for TTS + fancy voice delivery
 # via the image_delivery direct-delivery tracker; no duplication of generation or bubble logic).
@@ -367,6 +389,73 @@ def _build_topkorea_embed(ranking: list[dict[str, Any]]) -> discord.Embed:
     return embed
 
 
+def _build_korea50_embed(ranking: list[dict[str, Any]]) -> discord.Embed:
+    """Build a single compact embed for the Gamemeca weekly top 50 popularity ranking.
+
+    Everything translated to English where possible (game names via dictionary).
+    Shows genre + model (e.g. AOS / Partial Payment), publisher (English), and change for all 1-50.
+    """
+    # Small translations for genre/model so no Korean appears in the list
+    GENRE_TRANSLATIONS = {
+        "스포츠": "Sports",
+        "기타": "Other",
+        "어드벤쳐": "Adventure",
+        "액션 RPG": "Action RPG",
+        "롤플레잉": "Role-Playing",
+        "슈팅": "Shooter",
+    }
+    MODEL_TRANSLATIONS = {
+        "부분유료화": "Partial Payment",
+        "정액제": "Subscription",
+        "개발중": "In Development",
+        "유료화": "Paid",
+    }
+
+    lines: list[str] = []
+    for g in ranking:
+        display_name = g.get("english_name") or g.get("name", "")
+        display_pub = g.get("english_publisher") or g.get("publisher", "")
+        genre = g.get("genre", "")
+        model = g.get("model", "")
+
+        # Translate genre/model if we have English version
+        disp_genre = GENRE_TRANSLATIONS.get(genre, genre)
+        disp_model = MODEL_TRANSLATIONS.get(model, model)
+
+        ch = g.get("change", 0)
+        ch_str = gamemeca.format_rank_change(ch)  # always include for 1-50
+
+        extra = ""
+        if disp_genre or disp_model:
+            extra = f" — {disp_genre} / {disp_model}".strip() if disp_genre and disp_model else f" — {disp_genre or disp_model}".strip()
+
+        if g["rank"] == 1:
+            line = f"🥇 **{display_name}**{extra} ({display_pub}) {ch_str}".strip()
+        else:
+            line = f"{g['rank']}. **{display_name}**{extra} ({display_pub}) {ch_str}".strip()
+        lines.append(line)
+
+    description = "\n".join(lines) if lines else "No data available."
+
+    embed = discord.Embed(
+        title="🎮 Gamemeca Weekly Popularity Ranking (Top 50)",
+        description=description,
+        color=0x00A8E8,
+        url="https://www.gamemeca.com/ranking.php",
+    )
+    week = None
+    # week is stored in the module cache after fetch
+    try:
+        week = gamemeca._game_rank_cache.get("week")
+    except Exception:
+        pass
+    footer = "Source: gamemeca.com • Weekly ranking"
+    if week:
+        footer += f" • {week}"
+    embed.set_footer(text=footer)
+    return embed
+
+
 # =============================================================================
 # Slash Command Registration
 # =============================================================================
@@ -517,6 +606,32 @@ def register_slash_commands(
             return
 
         embed = _build_topkorea_embed(ranking)
+        await interaction.followup.send(embed=embed)
+
+    # /korea50 — weekly top 50 from Gamemeca 인기 게임 순위 (main ranking page).
+    # Uses HTML table parsing (no clean JSON feed available, see plan).
+    # English display consistent with /topkorea. Added 2026-06-22.
+    @tree.command(
+        name="korea50",
+        description="Top 50 weekly popularity ranking from Gamemeca (인기 게임 순위)"
+    )
+    async def korea50(interaction: discord.Interaction):
+        if interaction.guild and not is_guild_allowed(interaction.guild.id):
+            await interaction.response.send_message(
+                "Groksito is not available in this server.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(thinking=True, ephemeral=False)
+
+        ranking = await gamemeca.get_korea_weekly_ranking(50)
+        if not ranking:
+            await interaction.followup.send(
+                "Could not fetch the Gamemeca ranking right now."
+            )
+            return
+
+        embed = _build_korea50_embed(ranking)
         await interaction.followup.send(embed=embed)
 
     # /versus — compare two games with live Steam player counts + Twitch viewers.
@@ -826,7 +941,7 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
         _invoke_groksito,
     )
 
-    # on_ready
+# on_ready
     @_discord_client.event
     async def on_ready():
         logger.info(f"Γ£à Groksito connected as {_discord_client.user} (ID: {_discord_client.user.id})")
@@ -863,6 +978,14 @@ async def ensure_discord_connected(conversational: bool = True) -> "discord.Clie
             logger.info("[Steam] Background app list cache warmup launched")
         except Exception as steam_err:
             logger.debug(f"[Steam] Could not start app list warmup (non-fatal): {steam_err}")
+
+        # Gamemeca weekly ranking JSON updater (avoids live scrape on every /korea50)
+        try:
+            from .integrations import gamemeca as gamemeca_integration
+            asyncio.create_task(_periodic_gamemeca_ranking_update(gamemeca_integration))
+            logger.info("[Gamemeca] Background weekly ranking JSON updater launched (daily check)")
+        except Exception as gm_err:
+            logger.debug(f"[Gamemeca] Could not start ranking updater (non-fatal): {gm_err}")
 
         # Write initial heartbeat + supporting snapshots so the web dashboard has good data immediately.
         try:

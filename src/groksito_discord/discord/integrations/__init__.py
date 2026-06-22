@@ -8,6 +8,6 @@ Currently contains:
 Third-party data fetchers kept out of discord/client.py for clarity.
 """
 
-from . import steam, thelog, twitch
+from . import gamemeca, steam, thelog, twitch
 
-__all__ = ["steam", "thelog", "twitch"]
+__all__ = ["gamemeca", "steam", "thelog", "twitch"]
