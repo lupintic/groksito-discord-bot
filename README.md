@@ -32,6 +32,8 @@ The bot is designed around "maximum nativeness": minimal custom memory or contex
 
 - **Steam Integration**
   - Slash commands: `/stmchr` (fixed popular list), `/steamchart` (custom games), `/topgames` (live top from Steam Charts).
+- **Korea PC Bang rankings (TheLog)**
+  - `/topkorea` — live top 10 from https://www.thelog.co.kr (게임순위 전체, actual collected data). Added 2026-06-22.
   - Rich embeds with current players, game-themed colors, thumbnails (robust CDN + fallback resolution), and direct links to Steam store.
 
 - **xAI Authentication Options**
@@ -142,6 +144,7 @@ To run pre-built images with compose, uncomment the `image:` lines in `docker-co
 - Strong signals (e.g. "qué es eso de arriba", "genera una imagen de...", "lee esto en voz alta") in replies to other users can also wake it (conservative policy).
 - Use `/audio` or right-click message → Apps → "🔊 Leer en voz alta" for TTS.
 - Steam: `/stmchr`, `/steamchart`, `/topgames`.
+- Korea: `/topkorea` (TheLog PC bang ranking).
 - The web dashboard (`/config`, `/usage`, `/guilds`, etc.) lets you tweak safe settings without touching secrets.
 
 Example interactions are natural Spanish/English conversation. The bot is intentionally low-ceremony.
@@ -213,5 +216,7 @@ Keep changes focused and respect the "maximum nativeness" philosophy.
 ---
 
 **Status**: Active. Self-hostable with Docker. Focused on a clean, powerful, and natural Grok-in-Discord experience.
+
+**Recent addition (2026-06-22):** New `/topkorea` command for Korean PC bang game rankings (TheLog). Implementation notes + design in `docs/superpowers/`. Updated by Grok following superpowers workflow (brainstorm → design spec → plan → execute).
 
 Made with ❤️ by [@lupintic](https://github.com/lupintic).

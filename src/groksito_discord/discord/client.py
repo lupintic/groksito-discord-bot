@@ -54,7 +54,7 @@ from ..core.safety import safe_reply as _safe_reply
 
 # Steam + Twitch integrations (extracted for client hygiene).
 # Data fetching and game resolution live in discord/integrations/.
-from .integrations import steam, twitch
+from .integrations import steam, thelog, twitch
 
 from ..utils.text import extract_urls_from_text
 
@@ -318,6 +318,55 @@ def _build_steam_game_embeds(games: list[dict[str, Any]]) -> list[discord.Embed]
     return embeds
 
 
+def _build_topkorea_embed(ranking: list[dict[str, Any]]) -> discord.Embed:
+    """Build a single compact embed for the TheLog top 10 ranking (전체).
+
+    Styling:
+    - #1 uses 🥇 medal + bold (to stand out as the top / "golden")
+    - Rank changes: 🟢▲ for up (green), 🔴▼ for down (red), ⚪= for same
+      (the arrow + number get the color via emoji)
+
+    All displayed text is in English per user request.
+    Uses english_name / english_publisher when available.
+    Added 2026-06-22 for /topkorea.
+    """
+    lines: list[str] = []
+    for g in ranking:
+        ch = thelog.format_rank_change(g.get("change", 0))
+        display_name = g.get("english_name") or g.get("name", "")
+        display_pub = g.get("english_publisher") or g.get("publisher", "")
+
+        if g["rank"] == 1:
+            # Special standout for #1 (golden / top highlight)
+            # Using medal + bold to simulate "golden letters" effect in Discord
+            line = f"🥇 **{display_name}** — **{g['shares']:.2f}%** ({display_pub}) {ch}"
+        else:
+            line = f"{g['rank']}. **{display_name}** — **{g['shares']:.2f}%** ({display_pub}) {ch}"
+
+        lines.append(line)
+
+    description = "\n".join(lines) if lines else "No data available."
+
+    embed = discord.Embed(
+        title="🎮 Top 10 PC Bang Game Rankings (Overall)",
+        description=description,
+        color=0x00A8E8,
+        url="https://www.thelog.co.kr/index.do",
+    )
+    # Date from API payload (targetDate is YYYYMMDD)
+    target = None
+    if ranking:
+        raw0 = ranking[0].get("raw", {})
+        td = raw0.get("targetDate")
+        if isinstance(td, str) and len(td) == 8:
+            target = f"{td[:4]}.{td[4:6]}.{td[6:]}"
+    footer = "Source: thelog.co.kr • Real collected data"
+    if target:
+        footer += f" • {target}"
+    embed.set_footer(text=footer)
+    return embed
+
+
 # =============================================================================
 # Slash Command Registration
 # =============================================================================
@@ -443,6 +492,32 @@ def register_slash_commands(
             return
 
         await interaction.followup.send(embeds=_build_steam_game_embeds(games_data))
+
+    # /topkorea — live top 10 from TheLog (게임순위 전체) for Korean PC bangs.
+    # All visible text (title, labels, game/publisher names) is shown in English.
+    # Uses clean JSON endpoint. Added 2026-06-22.
+    @tree.command(
+        name="topkorea",
+        description="Top 10 PC Bang game rankings in Korea (TheLog overall)"
+    )
+    async def topkorea(interaction: discord.Interaction):
+        if interaction.guild and not is_guild_allowed(interaction.guild.id):
+            await interaction.response.send_message(
+                "Groksito is not available in this server.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(thinking=True, ephemeral=False)
+
+        ranking = await thelog.get_top_korea_rank(10)
+        if not ranking:
+            await interaction.followup.send(
+                "Could not fetch the TheLog ranking right now."
+            )
+            return
+
+        embed = _build_topkorea_embed(ranking)
+        await interaction.followup.send(embed=embed)
 
     # /versus — compare two games with live Steam player counts + Twitch viewers.
     @tree.command(
