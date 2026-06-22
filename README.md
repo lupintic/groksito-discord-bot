@@ -32,8 +32,9 @@ The bot is designed around "maximum nativeness": minimal custom memory or contex
 
 - **Steam Integration**
   - Slash commands: `/stmchr` (fixed popular list), `/steamchart` (custom games), `/topgames` (live top from Steam Charts).
-- **Korea PC Bang rankings (TheLog)**
-  - `/topkorea` — live top 10 from https://www.thelog.co.kr (게임순위 전체, actual collected data). Added 2026-06-22.
+- **Korea rankings**
+  - `/topkorea` — live top 10 from TheLog (게임순위 전체, PC bang actual data). Added 2026-06-22.
+  - `/korea50` — weekly top 50 popularity from Gamemeca (인기 게임 순위). Added using main ranking table.
   - Rich embeds with current players, game-themed colors, thumbnails (robust CDN + fallback resolution), and direct links to Steam store.
 
 - **xAI Authentication Options**
@@ -144,7 +145,7 @@ To run pre-built images with compose, uncomment the `image:` lines in `docker-co
 - Strong signals (e.g. "qué es eso de arriba", "genera una imagen de...", "lee esto en voz alta") in replies to other users can also wake it (conservative policy).
 - Use `/audio` or right-click message → Apps → "🔊 Leer en voz alta" for TTS.
 - Steam: `/stmchr`, `/steamchart`, `/topgames`.
-- Korea: `/topkorea` (TheLog PC bang ranking).
+- Korea: `/topkorea` (TheLog PC bang top 10), `/korea50` (Gamemeca weekly top 50).
 - The web dashboard (`/config`, `/usage`, `/guilds`, etc.) lets you tweak safe settings without touching secrets.
 
 Example interactions are natural Spanish/English conversation. The bot is intentionally low-ceremony.
